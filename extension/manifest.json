@@ -1,0 +1,42 @@
+{
+  "manifest_version": 3,
+  "name": "LinkedIn Job Hunter Extractor",
+  "version": "1.0.1",
+  "description": "Trích xuất và đồng bộ dữ liệu tin tuyển dụng thực tế từ LinkedIn về ứng dụng Job Hunter HCM & Đồng Nai.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "tabs"
+  ],
+  "host_permissions": [
+    "*://*.linkedin.com/*",
+    "http://localhost:3000/*",
+    "http://127.0.0.1:3000/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "LinkedIn Job Hunter Extractor"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.linkedin.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_end",
+      "all_frames": false
+    }
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "scripts": ["background.js"]
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "linkedin-job-hunter-extractor@antigravity.local",
+      "strict_min_version": "109.0"
+    }
+  }
+}
