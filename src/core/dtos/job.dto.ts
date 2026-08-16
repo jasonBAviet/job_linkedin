@@ -36,6 +36,8 @@ export interface JobPosting {
   isHot?: boolean;
   workMode: "ON_SITE" | "HYBRID" | "REMOTE";
   experienceYearsRequired?: number;
+  rawContent?: string;
+  rawBadges?: string[];
 }
 
 export interface JobSearchFilters {

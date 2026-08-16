@@ -1,93 +1,99 @@
 /**
- * LinkedIn Job Extractor - Content Script (V1.0.2)
- * Tự động tiêm Nút Nổi trực tiếp trên mọi trang LinkedIn và chuyển tiếp dữ liệu qua Background Worker để vượt rào cản CSP.
+ * LinkedIn Job Extractor - Content Script (V2.0.0 - Two-Stage Ingestion Pipeline)
+ * Giai đoạn 1: Quét và thu gom TOÀN BỘ dữ liệu thô hiển thị trên trang (Raw Dump)
+ * Gửi nguyên vẹn về máy chủ Next.js để Giai đoạn 2 (JobMappingService) thực hiện ánh xạ và đánh giá.
  */
 
-function extractActiveJob() {
-  // 1. Tiêu đề công việc
-  const titleElem =
-    document.querySelector(".job-details-jobs-unified-top-card__job-title") ||
-    document.querySelector(".jobs-unified-top-card__job-title") ||
-    document.querySelector(".jobs-details__main-content h1") ||
-    document.querySelector("h1.t-24") ||
-    document.querySelector(".jobs-search__job-details h1") ||
-    document.querySelector("h1") ||
-    document.querySelector("h2.t-24");
-
-  let title = titleElem ? titleElem.innerText.trim() : "";
-  if (!title && document.title) {
-    const parts = document.title.split("|")[0].split("-")[0];
-    title = parts.trim();
-  }
-
-  // 2. Tên công ty
-  const companyElem =
-    document.querySelector(".job-details-jobs-unified-top-card__company-name") ||
-    document.querySelector(".jobs-unified-top-card__company-name") ||
-    document.querySelector(".job-details-jobs-unified-top-card__primary-description a") ||
-    document.querySelector("a[href*='/company/']") ||
-    document.querySelector(".jobs-unified-top-card__subtitle-primary-grouping a");
-
-  let company = companyElem ? companyElem.innerText.trim() : "";
-  if (!company) {
-    company = "Doanh nghiệp trên LinkedIn";
-  }
-
-  // 3. Logo công ty
-  const logoElem =
-    document.querySelector(".job-details-jobs-unified-top-card__company-logo img") ||
-    document.querySelector(".jobs-unified-top-card__company-logo img") ||
-    document.querySelector(".ivm-view-attr__img--centered") ||
-    document.querySelector(".evi-image") ||
-    document.querySelector("img[alt*='logo' i]");
-
-  const companyLogo = logoElem ? logoElem.src || logoElem.getAttribute("src") : "";
-
-  // 4. Địa điểm
-  const primaryDescElem =
-    document.querySelector(".job-details-jobs-unified-top-card__primary-description") ||
-    document.querySelector(".jobs-unified-top-card__primary-description") ||
-    document.querySelector(".job-details-jobs-unified-top-card__bullet");
-
-  const primaryText = primaryDescElem ? primaryDescElem.innerText : document.body.innerText.substring(0, 500);
-
-  let locationDetails = "TP. Hồ Chí Minh";
-  if (primaryText.toLowerCase().includes("dong nai") || primaryText.toLowerCase().includes("đồng nai") || primaryText.toLowerCase().includes("bien hoa")) {
-    locationDetails = "Đồng Nai";
-  } else if (primaryText.toLowerCase().includes("ho chi minh") || primaryText.toLowerCase().includes("hồ chí minh")) {
-    locationDetails = "TP. Hồ Chí Minh";
-  }
-
-  // 5. Mức lương / Chế độ làm việc
-  const insights = Array.from(
-    document.querySelectorAll(".job-details-jobs-unified-top-card__job-insight, .jobs-unified-top-card__job-insight, .ui-label")
-  ).map((el) => el.innerText.trim());
-
-  let salaryText = "Thỏa thuận theo năng lực";
-  let workMode = "HYBRID";
-
-  for (const insight of insights) {
-    if (insight.includes("₫") || insight.includes("$") || insight.includes("/tháng") || insight.includes("/năm") || insight.includes("Triệu")) {
-      salaryText = insight;
-    }
-    if (insight.toLowerCase().includes("on-site") || insight.toLowerCase().includes("tại văn phòng")) {
-      workMode = "ON_SITE";
-    } else if (insight.toLowerCase().includes("remote") || insight.toLowerCase().includes("từ xa")) {
-      workMode = "REMOTE";
+/**
+ * Thu gom dữ liệu thô toàn diện của tin tuyển dụng đang mở trên màn hình
+ */
+function extractRawActiveJob() {
+  // 1. Quét Tiêu đề thô từ các vị trí tiêu đề
+  const titleSelectors = [
+    ".job-details-jobs-unified-top-card__job-title",
+    ".jobs-unified-top-card__job-title",
+    ".jobs-details__main-content h1",
+    "h1.t-24",
+    ".jobs-search__job-details h1",
+    "h1",
+    "h2.t-24",
+  ];
+  let rawTitle = "";
+  for (const sel of titleSelectors) {
+    const el = document.querySelector(sel);
+    if (el && el.innerText.trim().length > 0) {
+      rawTitle = el.innerText.trim();
+      break;
     }
   }
 
-  // 6. Mô tả chi tiết công việc (JD)
-  const descElem =
-    document.querySelector("#job-details") ||
-    document.querySelector(".jobs-description-content__text") ||
-    document.querySelector(".jobs-box__html-content") ||
-    document.querySelector(".jobs-description__content") ||
-    document.querySelector("article");
+  // 2. Quét Tên công ty thô
+  const companySelectors = [
+    ".job-details-jobs-unified-top-card__company-name",
+    ".jobs-unified-top-card__company-name",
+    ".job-details-jobs-unified-top-card__primary-description a",
+    "a[href*='/company/']",
+    ".jobs-unified-top-card__subtitle-primary-grouping a",
+  ];
+  let rawCompany = "";
+  for (const sel of companySelectors) {
+    const el = document.querySelector(sel);
+    if (el && el.innerText.trim().length > 0) {
+      rawCompany = el.innerText.trim();
+      break;
+    }
+  }
 
-  const jobDescription = descElem ? descElem.innerText.trim() : document.body.innerText.substring(0, 2000);
+  // 3. Quét Logo công ty
+  const logoSelectors = [
+    ".job-details-jobs-unified-top-card__company-logo img",
+    ".jobs-unified-top-card__company-logo img",
+    ".ivm-view-attr__img--centered",
+    ".evi-image",
+    "img[alt*='logo' i]",
+    "img[src*='media.licdn.com/dms/image']",
+  ];
+  let companyLogo = "";
+  for (const sel of logoSelectors) {
+    const el = document.querySelector(sel);
+    if (el && (el.src || el.getAttribute("src"))) {
+      companyLogo = el.src || el.getAttribute("src") || "";
+      break;
+    }
+  }
 
-  // 7. Đường dẫn công việc
+  // 4. Quét Toàn bộ các Huy hiệu và Thông tin phụ (Badges, Insights, Bullets)
+  const badgeElements = document.querySelectorAll(
+    ".job-details-jobs-unified-top-card__job-insight, .jobs-unified-top-card__job-insight, .ui-label, .artdeco-pill, .job-details-jobs-unified-top-card__bullet, .jobs-unified-top-card__bullet"
+  );
+  const rawBadges = Array.from(badgeElements)
+    .map((el) => el.innerText.trim())
+    .filter((txt) => txt.length > 0);
+
+  // 5. Quét TOÀN BỘ nội dung văn bản (Full Raw Content) của vùng hiển thị JD
+  const containerSelectors = [
+    "#job-details",
+    ".jobs-description-content__text",
+    ".jobs-box__html-content",
+    ".jobs-description__content",
+    ".jobs-search__job-details",
+    "article",
+    "main",
+  ];
+  let rawContent = "";
+  for (const sel of containerSelectors) {
+    const el = document.querySelector(sel);
+    if (el && el.innerText.trim().length > 50) {
+      rawContent = el.innerText.trim();
+      break;
+    }
+  }
+
+  // Nếu không tìm thấy vùng riêng biệt, lấy toàn bộ văn bản của trang
+  if (!rawContent || rawContent.length < 50) {
+    rawContent = document.body ? document.body.innerText.substring(0, 12000) : "";
+  }
+
   let linkedinUrl = window.location.href;
   const canonicalLink = document.querySelector("link[rel='canonical']");
   if (canonicalLink && canonicalLink.href) {
@@ -95,58 +101,55 @@ function extractActiveJob() {
   }
 
   return {
-    title: title || "Chuyên viên Phân tích (LinkedIn)",
-    company,
+    rawTitle: rawTitle || document.title,
+    rawCompany: rawCompany || "Doanh nghiệp",
     companyLogo: companyLogo || "",
-    locationDetails,
-    salaryText,
-    workMode,
-    jobDescription: jobDescription || "Mô tả công việc đang được cập nhật từ LinkedIn.",
-    linkedinUrl,
-    postedDate: new Date().toISOString().split("T")[0],
+    rawContent,
+    rawBadges,
+    pageUrl: linkedinUrl,
+    pageTitle: document.title,
+    timestamp: new Date().toISOString(),
   };
 }
 
-function extractAllJobsOnPage() {
-  const cards = document.querySelectorAll(
-    ".scaffold-layout__list-item, .jobs-search-results__list-item, .job-card-container, .base-search-card"
+/**
+ * Thu gom TOÀN BỘ các thẻ công việc hiển thị trên danh sách tìm kiếm
+ */
+function extractRawAllPageCards() {
+  const cardElements = document.querySelectorAll(
+    ".scaffold-layout__list-item, .jobs-search-results__list-item, .job-card-container, .base-search-card, a[href*='/jobs/view/']"
   );
 
-  const results = [];
-  cards.forEach((card, idx) => {
-    const titleEl = card.querySelector(".job-card-list__title, .job-card-container__link, .base-search-card__title");
-    const compEl = card.querySelector(".job-card-container__primary-description, .job-card-container__company-name, .base-search-card__subtitle");
-    const locEl = card.querySelector(".job-card-container__metadata-item, .job-search-card__location");
-    const linkEl = card.querySelector("a.job-card-container__link, a.job-card-list__title, a.base-card__full-link");
+  const rawCards = [];
+  cardElements.forEach((card, idx) => {
+    const cardText = card.innerText.trim();
+    if (cardText.length < 15) return;
+
+    const titleEl = card.querySelector(".job-card-list__title, .job-card-container__link, .base-search-card__title, h3, h4");
+    const compEl = card.querySelector(".job-card-container__primary-description, .job-card-container__company-name, .base-search-card__subtitle, a[href*='/company/']");
+    const linkEl = card.querySelector("a.job-card-container__link, a.job-card-list__title, a.base-card__full-link, a[href*='/jobs/view/']");
     const imgEl = card.querySelector("img");
 
-    const title = titleEl ? titleEl.innerText.trim() : "";
-    const company = compEl ? compEl.innerText.trim() : "";
-    const location = locEl ? locEl.innerText.trim() : "";
-    const link = linkEl ? linkEl.href : "";
-    const logo = imgEl ? imgEl.src : "";
+    const badges = Array.from(card.querySelectorAll(".job-card-container__metadata-item, .job-search-card__location, .badge"))
+      .map((b) => b.innerText.trim());
 
-    if (title || company) {
-      results.push({
-        id: `linkedin-card-${Date.now()}-${idx}`,
-        title: title || "Vị trí tuyển dụng",
-        company: company || "Doanh nghiệp",
-        companyLogo: logo,
-        locationDetails: location || "TP. Hồ Chí Minh",
-        linkedinUrl: link || window.location.href,
-        jobDescription: `Vị trí ${title} tại ${company}. Chi tiết xem tại: ${link}`,
-        salaryText: "Thỏa thuận theo năng lực",
-        workMode: "HYBRID",
-        postedDate: new Date().toISOString().split("T")[0],
-      });
-    }
+    rawCards.push({
+      id: `raw-card-${Date.now()}-${idx}`,
+      rawTitle: titleEl ? titleEl.innerText.trim() : "",
+      rawCompany: compEl ? compEl.innerText.trim() : "",
+      companyLogo: imgEl ? imgEl.src : "",
+      rawContent: cardText,
+      rawBadges: badges,
+      pageUrl: linkEl ? linkEl.href : window.location.href,
+      pageTitle: document.title,
+    });
   });
 
-  return results;
+  return rawCards;
 }
 
 /**
- * Tiêm Nút Nổi vào trang LinkedIn (Floating Action Button)
+ * Tiêm Nút Nổi trực tiếp trên trang LinkedIn
  */
 function injectFloatingButton() {
   if (document.getElementById("job-hunter-floating-widget")) {
@@ -178,7 +181,7 @@ function injectFloatingButton() {
     font-size: 12px !important;
     font-weight: 500 !important;
     box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4) !important;
-    max-width: 320px !important;
+    max-width: 340px !important;
     line-height: 1.4 !important;
     border: 1px solid #38BDF8 !important;
   `;
@@ -190,7 +193,6 @@ function injectFloatingButton() {
     <span style="font-weight:700; font-size:13px; letter-spacing:0.3px;">Đồng bộ về Job Hunter</span>
   `;
   btn.style.cssText = `
-    background: #4F46E5 !important;
     background: linear-gradient(135deg, #4F46E5 0%, #312E81 100%) !important;
     color: #FFFFFF !important;
     border: 2px solid #818CF8 !important;
@@ -214,15 +216,16 @@ function injectFloatingButton() {
     e.preventDefault();
     e.stopPropagation();
 
-    const job = extractActiveJob();
-    btn.innerText = "Đang gửi qua Service Worker...";
+    // Giai đoạn 1: Quét toàn bộ dữ liệu thô trên trang
+    const rawJobPayload = extractRawActiveJob();
+    btn.innerText = "Đang truyền tải dữ liệu thô...";
     btn.style.opacity = "0.7";
 
-    // Gửi qua Background Service Worker để vượt qua rào cản CSP của LinkedIn
+    // Gửi qua Background Worker để vượt CSP
     chrome.runtime.sendMessage(
       {
         action: "SYNC_JOB_TO_BACKEND",
-        payload: { job },
+        payload: { job: rawJobPayload },
       },
       (response) => {
         btn.innerHTML = `
@@ -233,9 +236,10 @@ function injectFloatingButton() {
 
         if (response && response.success && response.data && response.data.success) {
           const score = response.data.data?.[0]?.scoreResult?.totalScore || 0;
-          showToast(`Đã đồng bộ thành công! Điểm phù hợp CV: ${score}%. Mở http://localhost:3000 để xem.`, "#10B981");
+          const mappedTitle = response.data.data?.[0]?.title || "Việc làm";
+          showToast(`Đã thu thập & ánh xạ thành công: ${mappedTitle}. Điểm phù hợp CV: ${score}%. Mở http://localhost:3000 để xem.`, "#10B981");
         } else {
-          const errMsg = response?.data?.message || response?.error || "Lỗi khi đồng bộ dữ liệu về Dashboard.";
+          const errMsg = response?.data?.message || response?.error || "Lỗi khi truyền dữ liệu về Dashboard.";
           showToast(errMsg, "#EF4444");
         }
       }
@@ -260,26 +264,24 @@ function injectFloatingButton() {
   }
 }
 
-// Chạy khởi tạo ngay
 try {
   injectFloatingButton();
 } catch (e) {}
 
-// Giữ nút luôn hiển thị khi người dùng cuộn hoặc chuyển tab trên LinkedIn
 setInterval(() => {
   if (!document.getElementById("job-hunter-floating-widget")) {
     injectFloatingButton();
   }
 }, 1500);
 
-// Lắng nghe từ Popup
+// Lắng nghe yêu cầu từ Popup Extension
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "GET_ACTIVE_JOB") {
-    const job = extractActiveJob();
-    sendResponse({ success: !!job, data: job });
+    const rawJob = extractRawActiveJob();
+    sendResponse({ success: true, data: rawJob });
   } else if (request.action === "GET_ALL_PAGE_JOBS") {
-    const jobs = extractAllJobsOnPage();
-    sendResponse({ success: jobs.length > 0, data: jobs, total: jobs.length });
+    const rawCards = extractRawAllPageCards();
+    sendResponse({ success: rawCards.length > 0, data: rawCards, total: rawCards.length });
   }
   return true;
 });

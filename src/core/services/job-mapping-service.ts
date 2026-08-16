@@ -1,0 +1,259 @@
+import { JobPosting, JobRoleCategory, SeniorityLevel, WorkLocation } from "../dtos/job.dto";
+import { scoringService } from "./scoring-service";
+import { getCompanyLogoUrl } from "../utils/logo-resolver";
+
+export interface RawIngestedJob {
+  id?: string;
+  rawTitle?: string;
+  title?: string;
+  rawCompany?: string;
+  company?: string;
+  rawLocation?: string;
+  locationDetails?: string;
+  rawSalaryText?: string;
+  salaryText?: string;
+  rawContent?: string;
+  jobDescription?: string;
+  description?: string;
+  rawBadges?: string[];
+  pageUrl?: string;
+  linkedinUrl?: string;
+  url?: string;
+  pageTitle?: string;
+  companyLogo?: string;
+  workMode?: "ON_SITE" | "HYBRID" | "REMOTE";
+  postedDate?: string;
+}
+
+export class JobMappingService {
+  /**
+   * Ánh xạ toàn bộ dữ liệu thô (Raw Ingestion) thành đối tượng JobPosting chuẩn hóa
+   */
+  public mapRawToJobPosting(raw: RawIngestedJob): JobPosting {
+    const rawContent = raw.rawContent || raw.jobDescription || raw.description || "";
+    const rawBadges = raw.rawBadges || [];
+
+    // 1. Ánh xạ Tiêu đề công việc
+    const title = this.resolveJobTitle(raw.rawTitle || raw.title, rawContent, raw.pageTitle);
+
+    // 2. Ánh xạ Tên công ty
+    const company = this.resolveCompany(raw.rawCompany || raw.company, rawContent);
+
+    // 3. Phân loại Địa điểm (TP.HCM vs Đồng Nai)
+    const locationInfo = this.classifyLocation(raw.rawLocation || raw.locationDetails, rawContent, rawBadges);
+
+    // 4. Phân loại Vai trò (BA, DA, Hybrid)
+    const roleCategory = this.classifyRoleCategory(title, rawContent);
+
+    // 5. Phân loại Cấp bậc (Seniority)
+    const seniority = this.classifySeniority(title, rawContent);
+
+    // 6. Chuẩn hóa Mức lương
+    const salaryRange = this.parseSalary(raw.rawSalaryText || raw.salaryText, rawContent, rawBadges);
+
+    // 7. Xác định Hình thức làm việc
+    const workMode = this.classifyWorkMode(raw.workMode, rawContent, rawBadges);
+
+    // 8. Trích xuất Kỹ năng chuẩn BABOK và Data
+    const fullTextForSkills = `${title} ${company} ${rawBadges.join(" ")} ${rawContent}`;
+    const extractedSkills = scoringService.extractSkillsFromText(fullTextForSkills);
+
+    // 9. Tách tóm tắt Trách nhiệm & Yêu cầu
+    const { responsibilities, requirements } = this.extractSummaries(rawContent);
+
+    // 10. Phân giải Logo thương hiệu chính thức
+    const companyLogo = getCompanyLogoUrl(company, raw.companyLogo);
+
+    const id = raw.id || `job-ingested-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+    const linkedinUrl = raw.linkedinUrl || raw.url || raw.pageUrl || "https://www.linkedin.com/jobs";
+    const postedDate = raw.postedDate || new Date().toISOString().split("T")[0];
+
+    const expYears = seniority === "LEAD_MANAGER" ? 5 : seniority === "SENIOR" ? 4 : seniority === "MIDDLE" ? 2 : 1;
+
+    return {
+      id,
+      title,
+      company,
+      companyLogo,
+      location: locationInfo.location,
+      locationDetails: locationInfo.locationDetails,
+      roleCategory,
+      seniority,
+      salaryRange,
+      workMode,
+      jobDescription: rawContent.length > 20 ? rawContent : `Tuyển dụng ${title} tại ${company}. Chi tiết xem tại ${linkedinUrl}`,
+      requirementsSummary: requirements.length > 0 ? requirements : ["Có kinh nghiệm thực tế phù hợp với yêu cầu vị trí."],
+      responsibilitiesSummary: responsibilities.length > 0 ? responsibilities : ["Tham gia thực hiện các nhiệm vụ phân tích theo kế hoạch dự án."],
+      extractedSkills: extractedSkills.length > 0 ? extractedSkills : [
+        { name: "Requirements Engineering", category: "CORE", importance: "MUST_HAVE" },
+        { name: "SQL (Advanced Querying)", category: "CORE", importance: "MUST_HAVE" },
+      ],
+      linkedinUrl,
+      postedDate,
+      experienceYearsRequired: expYears,
+      rawContent,
+      rawBadges,
+    };
+  }
+
+  /**
+   * Ánh xạ danh sách việc làm thô
+   */
+  public mapBulkRawJobs(rawJobs: RawIngestedJob[]): JobPosting[] {
+    return rawJobs.map((raw) => this.mapRawToJobPosting(raw));
+  }
+
+  private resolveJobTitle(titleInput?: string, rawContent?: string, pageTitle?: string): string {
+    if (titleInput && titleInput.trim().length > 3 && !titleInput.includes("LinkedIn")) {
+      return titleInput.trim();
+    }
+    if (pageTitle && pageTitle.trim().length > 3) {
+      const clean = pageTitle.split("|")[0].split("-")[0].trim();
+      if (clean.length > 3 && !clean.includes("LinkedIn")) return clean;
+    }
+    const fullText = (rawContent || "").substring(0, 300);
+    const titleMatch = fullText.match(/(Senior|Lead|Junior|Principal|Middle)?\s*(IT Business Analyst|Business Analyst|Data Analyst|Product Business Analyst|Product Owner|BI Specialist|IT BA|Data Engineer|ERP Consultant)/i);
+    if (titleMatch) {
+      return titleMatch[0].trim();
+    }
+    const lines = (rawContent || "").split("\n").map((l) => l.trim()).filter((l) => l.length > 5);
+    if (lines.length > 0) {
+      const firstLine = lines[0];
+      if (firstLine.length < 80) return firstLine;
+    }
+    return "Senior Business / Data Analyst";
+  }
+
+  private resolveCompany(companyInput?: string, rawContent?: string): string {
+    if (companyInput && companyInput.trim().length > 1 && !companyInput.includes("LinkedIn")) {
+      return companyInput.trim();
+    }
+    const fullText = (rawContent || "").substring(0, 300);
+    const compMatch = fullText.match(/^([A-Za-z0-9\s&.,-]{2,40})\s+(tuyển dụng|tuyển|cần tuyển|is hiring|looking for)/i);
+    if (compMatch) {
+      return compMatch[1].trim();
+    }
+    const lines = (rawContent || "").split("\n").map((l) => l.trim()).filter((l) => l.length > 2);
+    if (lines.length > 1 && lines[1].length < 60) {
+      return lines[1];
+    }
+    return "Doanh nghiệp tuyển dụng";
+  }
+
+  private classifyLocation(locationInput?: string, rawContent?: string, badges: string[] = []): { location: WorkLocation; locationDetails: string } {
+    const combined = `${locationInput || ""} ${badges.join(" ")} ${(rawContent || "").substring(0, 1000)}`.toLowerCase();
+
+    const isDongNai =
+      combined.includes("đồng nai") ||
+      combined.includes("dong nai") ||
+      combined.includes("biên hòa") ||
+      combined.includes("bien hoa") ||
+      combined.includes("kcn amata") ||
+      combined.includes("long thành") ||
+      combined.includes("long thanh") ||
+      combined.includes("nhơn trạch") ||
+      combined.includes("nhon trach");
+
+    if (isDongNai) {
+      return {
+        location: "DONG_NAI",
+        locationDetails: locationInput && locationInput.length > 3 ? locationInput : "Đồng Nai / KCN Vùng Đông Nam Bộ",
+      };
+    }
+
+    return {
+      location: "HO_CHI_MINH",
+      locationDetails: locationInput && locationInput.length > 3 ? locationInput : "TP. Hồ Chí Minh",
+    };
+  }
+
+  private classifyRoleCategory(title: string, rawContent: string): JobRoleCategory {
+    const text = `${title} ${rawContent.substring(0, 500)}`.toLowerCase();
+    const isDA = text.includes("data") || text.includes("dữ liệu") || text.includes("bi ") || text.includes("analytics");
+    const isBA = text.includes("business") || text.includes("nghiệp vụ") || text.includes("ba ") || text.includes("product");
+
+    if (isDA && isBA) return "HYBRID_BA_DA";
+    if (isDA) return "DATA_ANALYST";
+    return "BUSINESS_ANALYST";
+  }
+
+  private classifySeniority(title: string, rawContent: string): SeniorityLevel {
+    const text = `${title} ${rawContent.substring(0, 300)}`.toLowerCase();
+    if (text.includes("lead") || text.includes("manager") || text.includes("trưởng nhóm") || text.includes("head") || text.includes("principal")) {
+      return "LEAD_MANAGER";
+    }
+    if (text.includes("junior") || text.includes("fresher") || text.includes("mới tốt nghiệp")) {
+      return "JUNIOR";
+    }
+    if (text.includes("intern") || text.includes("thực tập")) {
+      return "INTERN";
+    }
+    if (text.includes("middle") || text.includes("chuyên viên")) {
+      return "MIDDLE";
+    }
+    return "SENIOR";
+  }
+
+  private parseSalary(salaryInput?: string, rawContent?: string, badges: string[] = []): { min?: number; max?: number; currency: "VND" | "USD"; display: string; isNegotiable?: boolean } {
+    const candidateText = salaryInput || badges.find((b) => b.includes("₫") || b.includes("$") || b.includes("Triệu") || b.includes("tháng")) || "";
+    if (candidateText && candidateText.length > 2) {
+      const isUSD = candidateText.includes("$") || candidateText.toUpperCase().includes("USD");
+      return {
+        currency: isUSD ? "USD" : "VND",
+        display: candidateText,
+        isNegotiable: true,
+      };
+    }
+
+    // Quét regex trong nội dung
+    const fullText = (rawContent || "").substring(0, 1500);
+    const vnMatch = fullText.match(/(\d{1,2})\s*[-–to]+\s*(\d{1,2})\s*(tr|triệu|million)/i);
+    if (vnMatch) {
+      const min = parseInt(vnMatch[1], 10) * 1000000;
+      const max = parseInt(vnMatch[2], 10) * 1000000;
+      return {
+        min,
+        max,
+        currency: "VND",
+        display: `${vnMatch[1]} - ${vnMatch[2]} Triệu VNĐ`,
+      };
+    }
+
+    return {
+      currency: "VND",
+      display: "Thỏa thuận theo năng lực",
+      isNegotiable: true,
+    };
+  }
+
+  private classifyWorkMode(modeInput?: string, rawContent?: string, badges: string[] = []): "ON_SITE" | "HYBRID" | "REMOTE" {
+    if (modeInput === "ON_SITE" || modeInput === "HYBRID" || modeInput === "REMOTE") {
+      return modeInput;
+    }
+    const text = `${badges.join(" ")} ${(rawContent || "").substring(0, 500)}`.toLowerCase();
+    if (text.includes("remote") || text.includes("từ xa")) return "REMOTE";
+    if (text.includes("on-site") || text.includes("onsite") || text.includes("tại văn phòng")) return "ON_SITE";
+    return "HYBRID";
+  }
+
+  private extractSummaries(rawContent: string): { responsibilities: string[]; requirements: string[] } {
+    const lines = rawContent
+      .split("\n")
+      .map((l) => l.trim().replace(/^[-*•+•\d.]\s*/, ""))
+      .filter((l) => l.length > 15 && !l.toLowerCase().includes("linkedin") && !l.toLowerCase().includes("easy apply"));
+
+    if (lines.length >= 6) {
+      return {
+        responsibilities: lines.slice(0, 4),
+        requirements: lines.slice(4, 8),
+      };
+    }
+
+    return {
+      responsibilities: lines.slice(0, 3),
+      requirements: lines.slice(3, 6),
+    };
+  }
+}
+
+export const jobMappingService = new JobMappingService();
