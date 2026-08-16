@@ -1,4 +1,5 @@
 import { ALL_TAXONOMY_SKILLS, TaxonomySkillItem } from "../constants/skills.taxonomy";
+import { DEFAULT_SYSTEM_CONFIG, ScoringWeightsConfig } from "../constants/app-config";
 import { JobPosting, SkillRequirement } from "../dtos/job.dto";
 import { CandidateProfile, CandidateSkill } from "../dtos/profile.dto";
 import {
@@ -11,12 +12,18 @@ import {
 
 export class ScoringService {
   /**
-   * Tính toán độ phù hợp toàn diện giữa Hồ sơ ứng viên và Tin tuyển dụng
+   * Tính toán độ phù hợp toàn diện giữa Hồ sơ ứng viên và Tin tuyển dụng với trọng số tham số hóa
    */
   public calculateMatchScore(
     candidate: CandidateProfile,
-    job: JobPosting
+    job: JobPosting,
+    customWeights?: Partial<ScoringWeightsConfig>
   ): JobMatchScoreResult {
+    const weights: ScoringWeightsConfig = {
+      ...DEFAULT_SYSTEM_CONFIG.scoringWeights,
+      ...customWeights,
+    };
+
     const candidateSkillMap = new Map<string, CandidateSkill>();
     for (const skill of candidate.skills) {
       candidateSkillMap.set(skill.name.toLowerCase().trim(), skill);
@@ -34,14 +41,23 @@ export class ScoringService {
 
     for (const req of job.extractedSkills) {
       const isMustHave = req.importance === "MUST_HAVE";
-      const weight = isMustHave ? 10 : 5;
+      const isCore = req.category === "CORE";
+
+      const weight = isCore
+        ? isMustHave
+          ? weights.coreMustHaveWeight
+          : weights.coreGoodToHaveWeight
+        : isMustHave
+        ? weights.secondaryMustHaveWeight
+        : weights.secondaryGoodToHaveWeight;
+
       const candidateSkill = this.findMatchingCandidateSkill(req.name, candidateSkillMap);
 
-      if (req.category === "CORE") {
+      if (isCore) {
         coreTotalPoints += weight;
         if (candidateSkill) {
           const profMultiplier = candidateSkill.proficiencyLevel / 5;
-          coreMatchedPoints += weight * Math.max(0.6, profMultiplier);
+          coreMatchedPoints += weight * Math.max(weights.minProficiencyFloor, profMultiplier);
           matchedSkillNames.push(req.name);
         } else {
           if (isMustHave) missingMustHave.push(req);

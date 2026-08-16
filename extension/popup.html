@@ -13,7 +13,7 @@
     }
     body {
       width: 360px;
-      min-height: 380px;
+      min-height: 420px;
       background-color: #0F172A;
       color: #F8FAFC;
       font-size: 13px;
@@ -69,7 +69,7 @@
       border: 1px solid #334155;
       border-radius: 8px;
       padding: 12px;
-      margin-bottom: 14px;
+      margin-bottom: 12px;
     }
     .card-title {
       font-size: 11px;
@@ -174,6 +174,21 @@
       font-size: 11px;
       padding: 4px;
     }
+    .server-config-input {
+      width: 100%;
+      background-color: #0F172A;
+      border: 1px solid #475569;
+      border-radius: 4px;
+      color: #F8FAFC;
+      padding: 6px 8px;
+      font-size: 11px;
+      font-family: monospace;
+      margin-bottom: 6px;
+    }
+    .server-config-input:focus {
+      outline: none;
+      border-color: #6366F1;
+    }
     .alert {
       padding: 10px 12px;
       border-radius: 6px;
@@ -198,7 +213,7 @@
   <div class="header">
     <div>
       <div class="brand-title">Job Hunter Extractor</div>
-      <div class="brand-subtitle">Senior BA / DA Sync</div>
+      <div class="brand-subtitle">Dynamic Ingestion & Mapping</div>
     </div>
     <div id="statusBadge" class="status-badge">
       <span id="statusDot" class="status-dot"></span>
@@ -224,6 +239,14 @@
     </div>
   </div>
 
+  <div class="card">
+    <div class="card-title">Cấu hình Máy chủ (Dynamic Server URL)</div>
+    <input type="text" id="inputServerUrl" class="server-config-input" value="http://localhost:3000" placeholder="http://localhost:3000" />
+    <button id="btnSaveServerUrl" class="btn btn-secondary" style="padding: 5px 10px; font-size: 11px;">
+      Lưu cấu hình máy chủ
+    </button>
+  </div>
+
   <div class="actions">
     <button id="btnSyncCurrent" class="btn btn-primary">
       Đồng bộ công việc này vào Dashboard
@@ -232,7 +255,7 @@
       Quét tất cả việc làm trên trang
     </button>
     <button id="btnOpenDashboard" class="btn btn-link">
-      Mở ứng dụng Job Hunter (localhost:3000)
+      Mở Dashboard ứng dụng
     </button>
   </div>
 

@@ -1,36 +1,44 @@
 /**
- * Background Service Worker cho WebExtension (Chrome & Firefox)
- * Đóng vai trò Proxy chuyển tiếp HTTP Request để vượt qua rào cản Content-Security-Policy (CSP) của LinkedIn.
+ * Background Service Worker cho WebExtension
+ * Đọc cấu hình Server URL động từ Storage hoặc Message Payload, không hardcode cố định.
  */
 
-const BACKEND_URL = "http://localhost:3000";
+const DEFAULT_BACKEND_URL = "http://localhost:3000";
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log("LinkedIn Job Hunter Extractor Service Worker khoi tao thanh cong.");
+  chrome.storage.local.get(["serverUrl"], (res) => {
+    if (!res.serverUrl) {
+      chrome.storage.local.set({ serverUrl: DEFAULT_BACKEND_URL });
+    }
+  });
 });
 
-// Lắng nghe yêu cầu gửi dữ liệu từ Content Script và Popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "SYNC_JOB_TO_BACKEND") {
-    fetch(`${BACKEND_URL}/api/jobs/import`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(request.payload),
-    })
-      .then(async (response) => {
-        const json = await response.json();
-        sendResponse({ success: response.ok, data: json });
-      })
-      .catch((error) => {
-        sendResponse({
-          success: false,
-          error: "Không thể kết nối đến máy chủ http://localhost:3000. Hãy đảm bảo dự án đang chạy npm run dev.",
-        });
-      });
+    // Ưu tiên Server URL truyền trong payload, sau đó là storage, cuối cùng là default
+    chrome.storage.local.get(["serverUrl"], (res) => {
+      const targetServerUrl = request.serverUrl || res.serverUrl || DEFAULT_BACKEND_URL;
+      const endpoint = `${targetServerUrl.replace(/\/+$/, "")}/api/jobs/import`;
 
-    // Trả về true để giữ kênh kết nối bất đồng bộ cho sendResponse
+      fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(request.payload),
+      })
+        .then(async (response) => {
+          const json = await response.json();
+          sendResponse({ success: response.ok, data: json, targetServerUrl });
+        })
+        .catch((error) => {
+          sendResponse({
+            success: false,
+            error: `Không thể kết nối đến máy chủ ${targetServerUrl}. Vui lòng kiểm tra lại cấu hình hoặc đảm bảo dịch vụ đang chạy.`,
+          });
+        });
+    });
+
     return true;
   }
 });

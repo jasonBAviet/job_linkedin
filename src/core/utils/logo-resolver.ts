@@ -3,13 +3,13 @@
  * Áp dụng cho các doanh nghiệp tuyển dụng tại Việt Nam (TP.HCM, Đồng Nai)
  */
 
-interface CompanyBrandInfo {
+export interface CompanyBrandInfo {
   domain: string;
   officialLogoUrl?: string;
   primaryColor: string;
 }
 
-const KNOWN_COMPANY_BRANDS: Record<string, CompanyBrandInfo> = {
+export const KNOWN_COMPANY_BRANDS: Record<string, CompanyBrandInfo> = {
   vnpay: {
     domain: "vnpay.vn",
     officialLogoUrl: "https://vnpay.vn/assets/images/logo.svg",
@@ -113,14 +113,18 @@ const KNOWN_COMPANY_BRANDS: Record<string, CompanyBrandInfo> = {
 };
 
 /**
- * Trích xuất domain hoặc tìm kiếm cấu hình thương hiệu của công ty
+ * Trích xuất domain hoặc tìm kiếm cấu hình thương hiệu của công ty (hỗ trợ registry mở rộng)
  */
-export function resolveCompanyBrand(companyName: string): CompanyBrandInfo | null {
+export function resolveCompanyBrand(
+  companyName: string,
+  customRegistry?: Record<string, CompanyBrandInfo>
+): CompanyBrandInfo | null {
   if (!companyName) return null;
   const nameClean = companyName.toLowerCase().trim();
+  const registry = { ...KNOWN_COMPANY_BRANDS, ...customRegistry };
 
-  // Tìm trong danh mục các thương hiệu phổ biến
-  for (const [key, brand] of Object.entries(KNOWN_COMPANY_BRANDS)) {
+  // Tìm trong danh mục các thương hiệu
+  for (const [key, brand] of Object.entries(registry)) {
     if (nameClean.includes(key)) {
       return brand;
     }
@@ -143,19 +147,29 @@ export function resolveCompanyBrand(companyName: string): CompanyBrandInfo | nul
 }
 
 /**
- * Lấy đường dẫn Logo thương hiệu tối ưu cho công ty
+ * Lấy đường dẫn Logo thương hiệu tối ưu cho công ty (hỗ trợ tùy biến CDN)
  */
-export function getCompanyLogoUrl(companyName: string, fallbackUrl?: string): string {
+export function getCompanyLogoUrl(
+  companyName: string,
+  fallbackUrl?: string,
+  options?: {
+    customRegistry?: Record<string, CompanyBrandInfo>;
+    faviconCdnTemplate?: (domain: string) => string;
+  }
+): string {
   if (fallbackUrl && !fallbackUrl.includes("unsplash.com")) {
     return fallbackUrl;
   }
 
-  const brand = resolveCompanyBrand(companyName);
+  const brand = resolveCompanyBrand(companyName, options?.customRegistry);
   if (brand?.officialLogoUrl) {
     return brand.officialLogoUrl;
   }
 
   if (brand?.domain) {
+    if (options?.faviconCdnTemplate) {
+      return options.faviconCdnTemplate(brand.domain);
+    }
     // Sử dụng Google S2 Favicon API độ phân giải 128x128 làm CDN ổn định
     return `https://www.google.com/s2/favicons?domain=${brand.domain}&sz=128`;
   }

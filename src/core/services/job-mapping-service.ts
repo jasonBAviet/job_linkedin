@@ -1,6 +1,7 @@
 import { JobPosting, JobRoleCategory, SeniorityLevel, WorkLocation } from "../dtos/job.dto";
 import { scoringService } from "./scoring-service";
 import { getCompanyLogoUrl } from "../utils/logo-resolver";
+import { DEFAULT_SYSTEM_CONFIG, SystemConfig } from "../constants/app-config";
 
 export interface RawIngestedJob {
   id?: string;
@@ -26,10 +27,24 @@ export interface RawIngestedJob {
 }
 
 export class JobMappingService {
+  private config: SystemConfig;
+
+  constructor(customConfig?: Partial<SystemConfig>) {
+    this.config = { ...DEFAULT_SYSTEM_CONFIG, ...customConfig };
+  }
+
+  /**
+   * Cập nhật cấu hình động cho Mapping Service
+   */
+  public updateConfig(newConfig: Partial<SystemConfig>): void {
+    this.config = { ...this.config, ...newConfig };
+  }
+
   /**
    * Ánh xạ toàn bộ dữ liệu thô (Raw Ingestion) thành đối tượng JobPosting chuẩn hóa
    */
-  public mapRawToJobPosting(raw: RawIngestedJob): JobPosting {
+  public mapRawToJobPosting(raw: RawIngestedJob, customConfig?: Partial<SystemConfig>): JobPosting {
+    const activeConfig = customConfig ? { ...this.config, ...customConfig } : this.config;
     const rawContent = raw.rawContent || raw.jobDescription || raw.description || "";
     const rawBadges = raw.rawBadges || [];
 
@@ -39,36 +54,34 @@ export class JobMappingService {
     // 2. Ánh xạ Tên công ty
     const company = this.resolveCompany(raw.rawCompany || raw.company, rawContent);
 
-    // 3. Phân loại Địa điểm (TP.HCM vs Đồng Nai)
-    const locationInfo = this.classifyLocation(raw.rawLocation || raw.locationDetails, rawContent, rawBadges);
+    // 3. Phân loại Địa điểm động
+    const locationInfo = this.classifyLocation(raw.rawLocation || raw.locationDetails, rawContent, rawBadges, activeConfig);
 
-    // 4. Phân loại Vai trò (BA, DA, Hybrid)
-    const roleCategory = this.classifyRoleCategory(title, rawContent);
+    // 4. Phân loại Vai trò động
+    const roleCategory = this.classifyRoleCategory(title, rawContent, activeConfig);
 
-    // 5. Phân loại Cấp bậc (Seniority)
-    const seniority = this.classifySeniority(title, rawContent);
+    // 5. Phân loại Cấp bậc động
+    const seniorityInfo = this.classifySeniority(title, rawContent, activeConfig);
 
-    // 6. Chuẩn hóa Mức lương
-    const salaryRange = this.parseSalary(raw.rawSalaryText || raw.salaryText, rawContent, rawBadges);
+    // 6. Chuẩn hóa Mức lương động
+    const salaryRange = this.parseSalary(raw.rawSalaryText || raw.salaryText, rawContent, rawBadges, activeConfig);
 
     // 7. Xác định Hình thức làm việc
     const workMode = this.classifyWorkMode(raw.workMode, rawContent, rawBadges);
 
-    // 8. Trích xuất Kỹ năng chuẩn BABOK và Data
+    // 8. Trích xuất Kỹ năng
     const fullTextForSkills = `${title} ${company} ${rawBadges.join(" ")} ${rawContent}`;
     const extractedSkills = scoringService.extractSkillsFromText(fullTextForSkills);
 
     // 9. Tách tóm tắt Trách nhiệm & Yêu cầu
     const { responsibilities, requirements } = this.extractSummaries(rawContent);
 
-    // 10. Phân giải Logo thương hiệu chính thức
+    // 10. Phân giải Logo thương hiệu
     const companyLogo = getCompanyLogoUrl(company, raw.companyLogo);
 
     const id = raw.id || `job-ingested-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
     const linkedinUrl = raw.linkedinUrl || raw.url || raw.pageUrl || "https://www.linkedin.com/jobs";
     const postedDate = raw.postedDate || new Date().toISOString().split("T")[0];
-
-    const expYears = seniority === "LEAD_MANAGER" ? 5 : seniority === "SENIOR" ? 4 : seniority === "MIDDLE" ? 2 : 1;
 
     return {
       id,
@@ -78,7 +91,7 @@ export class JobMappingService {
       location: locationInfo.location,
       locationDetails: locationInfo.locationDetails,
       roleCategory,
-      seniority,
+      seniority: seniorityInfo.level,
       salaryRange,
       workMode,
       jobDescription: rawContent.length > 20 ? rawContent : `Tuyển dụng ${title} tại ${company}. Chi tiết xem tại ${linkedinUrl}`,
@@ -90,7 +103,7 @@ export class JobMappingService {
       ],
       linkedinUrl,
       postedDate,
-      experienceYearsRequired: expYears,
+      experienceYearsRequired: seniorityInfo.experienceYears,
       rawContent,
       rawBadges,
     };
@@ -99,8 +112,8 @@ export class JobMappingService {
   /**
    * Ánh xạ danh sách việc làm thô
    */
-  public mapBulkRawJobs(rawJobs: RawIngestedJob[]): JobPosting[] {
-    return rawJobs.map((raw) => this.mapRawToJobPosting(raw));
+  public mapBulkRawJobs(rawJobs: RawIngestedJob[], customConfig?: Partial<SystemConfig>): JobPosting[] {
+    return rawJobs.map((raw) => this.mapRawToJobPosting(raw, customConfig));
   }
 
   private resolveJobTitle(titleInput?: string, rawContent?: string, pageTitle?: string): string {
@@ -140,61 +153,72 @@ export class JobMappingService {
     return "Doanh nghiệp tuyển dụng";
   }
 
-  private classifyLocation(locationInput?: string, rawContent?: string, badges: string[] = []): { location: WorkLocation; locationDetails: string } {
+  private classifyLocation(
+    locationInput?: string,
+    rawContent?: string,
+    badges: string[] = [],
+    cfg: SystemConfig = DEFAULT_SYSTEM_CONFIG
+  ): { location: WorkLocation; locationDetails: string } {
     const combined = `${locationInput || ""} ${badges.join(" ")} ${(rawContent || "").substring(0, 1000)}`.toLowerCase();
 
-    const isDongNai =
-      combined.includes("đồng nai") ||
-      combined.includes("dong nai") ||
-      combined.includes("biên hòa") ||
-      combined.includes("bien hoa") ||
-      combined.includes("kcn amata") ||
-      combined.includes("long thành") ||
-      combined.includes("long thanh") ||
-      combined.includes("nhơn trạch") ||
-      combined.includes("nhon trach");
-
-    if (isDongNai) {
-      return {
-        location: "DONG_NAI",
-        locationDetails: locationInput && locationInput.length > 3 ? locationInput : "Đồng Nai / KCN Vùng Đông Nam Bộ",
-      };
+    for (const rule of cfg.locations) {
+      for (const kw of rule.keywords) {
+        if (combined.includes(kw.toLowerCase())) {
+          return {
+            location: rule.location,
+            locationDetails: locationInput && locationInput.length > 3 ? locationInput : rule.defaultDetails,
+          };
+        }
+      }
     }
 
     return {
-      location: "HO_CHI_MINH",
-      locationDetails: locationInput && locationInput.length > 3 ? locationInput : "TP. Hồ Chí Minh",
+      location: cfg.defaultLocation,
+      locationDetails: locationInput && locationInput.length > 3 ? locationInput : "Khu vực tuyển dụng",
     };
   }
 
-  private classifyRoleCategory(title: string, rawContent: string): JobRoleCategory {
-    const text = `${title} ${rawContent.substring(0, 500)}`.toLowerCase();
-    const isDA = text.includes("data") || text.includes("dữ liệu") || text.includes("bi ") || text.includes("analytics");
-    const isBA = text.includes("business") || text.includes("nghiệp vụ") || text.includes("ba ") || text.includes("product");
+  private classifyRoleCategory(title: string, rawContent: string, cfg: SystemConfig = DEFAULT_SYSTEM_CONFIG): JobRoleCategory {
+    const titleLower = title.toLowerCase();
+    const contentLower = rawContent.substring(0, 600).toLowerCase();
 
-    if (isDA && isBA) return "HYBRID_BA_DA";
-    if (isDA) return "DATA_ANALYST";
+    for (const rule of cfg.roleCategories) {
+      const matchTitle = rule.titleKeywords.some((kw) => titleLower.includes(kw.toLowerCase()));
+      const matchContent = rule.contentKeywords.some((kw) => contentLower.includes(kw.toLowerCase()));
+      if (matchTitle || matchContent) {
+        return rule.category;
+      }
+    }
+
     return "BUSINESS_ANALYST";
   }
 
-  private classifySeniority(title: string, rawContent: string): SeniorityLevel {
-    const text = `${title} ${rawContent.substring(0, 300)}`.toLowerCase();
-    if (text.includes("lead") || text.includes("manager") || text.includes("trưởng nhóm") || text.includes("head") || text.includes("principal")) {
-      return "LEAD_MANAGER";
+  private classifySeniority(title: string, rawContent: string, cfg: SystemConfig = DEFAULT_SYSTEM_CONFIG): { level: SeniorityLevel; experienceYears: number } {
+    const combined = `${title} ${rawContent.substring(0, 300)}`.toLowerCase();
+
+    for (const rule of cfg.seniorities) {
+      for (const kw of rule.keywords) {
+        if (combined.includes(kw.toLowerCase())) {
+          return {
+            level: rule.level,
+            experienceYears: rule.defaultExperienceYears,
+          };
+        }
+      }
     }
-    if (text.includes("junior") || text.includes("fresher") || text.includes("mới tốt nghiệp")) {
-      return "JUNIOR";
-    }
-    if (text.includes("intern") || text.includes("thực tập")) {
-      return "INTERN";
-    }
-    if (text.includes("middle") || text.includes("chuyên viên")) {
-      return "MIDDLE";
-    }
-    return "SENIOR";
+
+    return {
+      level: "SENIOR",
+      experienceYears: 4,
+    };
   }
 
-  private parseSalary(salaryInput?: string, rawContent?: string, badges: string[] = []): { min?: number; max?: number; currency: "VND" | "USD"; display: string; isNegotiable?: boolean } {
+  private parseSalary(
+    salaryInput?: string,
+    rawContent?: string,
+    badges: string[] = [],
+    cfg: SystemConfig = DEFAULT_SYSTEM_CONFIG
+  ): { min?: number; max?: number; currency: "VND" | "USD"; display: string; isNegotiable?: boolean } {
     const candidateText = salaryInput || badges.find((b) => b.includes("₫") || b.includes("$") || b.includes("Triệu") || b.includes("tháng")) || "";
     if (candidateText && candidateText.length > 2) {
       const isUSD = candidateText.includes("$") || candidateText.toUpperCase().includes("USD");
@@ -205,7 +229,6 @@ export class JobMappingService {
       };
     }
 
-    // Quét regex trong nội dung
     const fullText = (rawContent || "").substring(0, 1500);
     const vnMatch = fullText.match(/(\d{1,2})\s*[-–to]+\s*(\d{1,2})\s*(tr|triệu|million)/i);
     if (vnMatch) {
@@ -220,7 +243,7 @@ export class JobMappingService {
     }
 
     return {
-      currency: "VND",
+      currency: cfg.defaultCurrency,
       display: "Thỏa thuận theo năng lực",
       isNegotiable: true,
     };

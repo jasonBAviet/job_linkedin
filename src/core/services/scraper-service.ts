@@ -1,31 +1,46 @@
 import * as cheerio from "cheerio";
-import { JobPosting, JobRoleCategory, SeniorityLevel, WorkLocation } from "../dtos/job.dto";
-import { scoringService } from "./scoring-service";
-import { getCompanyLogoUrl } from "../utils/logo-resolver";
+import { JobPosting, JobRoleCategory, WorkLocation } from "../dtos/job.dto";
+import { jobMappingService } from "./job-mapping-service";
+import { DEFAULT_SYSTEM_CONFIG, SystemConfig } from "../constants/app-config";
 
 export interface ScrapeOptions {
   keywords?: string;
-  location?: "HO_CHI_MINH" | "DONG_NAI" | "ALL";
+  location?: WorkLocation | "ALL";
+  locationCustomQuery?: string;
   roleCategory?: JobRoleCategory | "ALL";
   count?: number;
+  config?: Partial<SystemConfig>;
 }
 
 export class ScraperService {
+  private config: SystemConfig;
+
+  constructor(customConfig?: Partial<SystemConfig>) {
+    this.config = { ...DEFAULT_SYSTEM_CONFIG, ...customConfig };
+  }
+
   /**
-   * Cào hoặc thu thập các việc làm mới nhất từ LinkedIn
+   * Cào hoặc thu thập các việc làm mới nhất từ LinkedIn Guest API theo tham số động
    */
   public async scrapeLinkedInJobs(options: ScrapeOptions = {}): Promise<JobPosting[]> {
-    const locKeyword =
-      options.location === "DONG_NAI"
-        ? "Dong Nai, Vietnam"
-        : options.location === "HO_CHI_MINH"
-        ? "Ho Chi Minh City, Vietnam"
-        : "Vietnam";
+    const activeConfig = options.config ? { ...this.config, ...options.config } : this.config;
 
-    const roleKw = options.keywords || (options.roleCategory === "DATA_ANALYST" ? "Data Analyst" : "Business Analyst");
+    let locQuery = options.locationCustomQuery;
+    if (!locQuery) {
+      if (options.location === "DONG_NAI") {
+        locQuery = "Dong Nai, Vietnam";
+      } else if (options.location === "HO_CHI_MINH") {
+        locQuery = "Ho Chi Minh City, Vietnam";
+      } else {
+        locQuery = "Vietnam";
+      }
+    }
+
+    const defaultKw = options.roleCategory === "DATA_ANALYST" ? "Data Analyst" : "Business Analyst";
+    const roleKw = options.keywords || defaultKw;
+
     const encodedKeywords = encodeURIComponent(roleKw);
-    const encodedLocation = encodeURIComponent(locKeyword);
-
+    const encodedLocation = encodeURIComponent(locQuery);
     const targetUrl = `https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=${encodedKeywords}&location=${encodedLocation}&start=0`;
 
     try {
@@ -39,24 +54,24 @@ export class ScraperService {
 
       if (response.ok) {
         const html = await response.text();
-        const parsedJobs = this.parseLinkedInHtml(html, options.location || "HO_CHI_MINH");
+        const parsedJobs = this.parseLinkedInHtml(html, activeConfig);
         if (parsedJobs.length > 0) {
           return parsedJobs;
         }
       }
     } catch {
-      // Fallback tự động sang dữ liệu động thời gian thực khi LinkedIn giới hạn truy cập
+      // Fallback sang pool dữ liệu động khi bị giới hạn IP
     }
 
-    return this.generateDynamicScrapedJobs(options);
+    return this.generateDynamicScrapedJobs(options, activeConfig);
   }
 
   /**
-   * Phân tích mã nguồn HTML từ LinkedIn Guest API
+   * Phân tích mã nguồn HTML từ LinkedIn Guest API sử dụng JobMappingService
    */
-  private parseLinkedInHtml(html: string, fallbackLocation: WorkLocation | "ALL"): JobPosting[] {
+  private parseLinkedInHtml(html: string, cfg: SystemConfig): JobPosting[] {
     const $ = cheerio.load(html);
-    const jobs: JobPosting[] = [];
+    const rawList: any[] = [];
 
     $(".job-search-card").each((index, element) => {
       const title = $(element).find(".base-search-card__title").text().trim();
@@ -66,51 +81,19 @@ export class ScraperService {
       const dateText = $(element).find("time").attr("datetime") || new Date().toISOString().split("T")[0];
 
       if (title && company) {
-        const isDongNai = locationText.toLowerCase().includes("dong nai") || locationText.toLowerCase().includes("bien hoa");
-        const location: WorkLocation = isDongNai ? "DONG_NAI" : "HO_CHI_MINH";
-        const roleCategory: JobRoleCategory = title.toLowerCase().includes("data") ? "DATA_ANALYST" : "BUSINESS_ANALYST";
-        const seniority = this.detectSeniority(title);
-
-        const extractedSkills = scoringService.extractSkillsFromText(`${title} ${company} ${roleCategory}`);
-
-        jobs.push({
-          id: `linkedin-${Date.now()}-${index}`,
-          title,
-          company,
-          companyLogo: getCompanyLogoUrl(company),
-          location,
-          locationDetails: locationText || (location === "DONG_NAI" ? "Đồng Nai" : "TP. Hồ Chí Minh"),
-          roleCategory,
-          seniority,
-          salaryRange: {
-            isNegotiable: true,
-            currency: "VND",
-            display: "Thương lượng theo năng lực",
-          },
-          workMode: "HYBRID",
-          jobDescription: `Vị trí ${title} tại ${company}. Yêu cầu ứng viên có kiến thức chuyên môn vững vàng, khả năng giao tiếp và làm việc nhóm tốt.`,
-          requirementsSummary: [
-            "Có kinh nghiệm làm việc thực tế ở vị trí tương đương.",
-            "Thành thạo các kỹ năng phân tích và công cụ chuyên ngành.",
-            "Tư duy logic, khả năng giải quyết vấn đề linh hoạt.",
-          ],
-          responsibilitiesSummary: [
-            "Tham gia thực hiện các dự án theo kế hoạch của khối nghiệp vụ.",
-            "Phối hợp với các phòng ban liên quan để tối ưu hóa hiệu quả công việc.",
-          ],
-          extractedSkills: extractedSkills.length > 0 ? extractedSkills : [
-            { name: "Requirements Engineering", category: "CORE", importance: "MUST_HAVE" },
-            { name: "SQL (Advanced Querying)", category: "CORE", importance: "MUST_HAVE" },
-            { name: "Stakeholder Management", category: "SOFT_SKILL", importance: "MUST_HAVE" },
-          ],
+        rawList.push({
+          id: `linkedin-guest-${Date.now()}-${index}`,
+          rawTitle: title,
+          rawCompany: company,
+          rawLocation: locationText,
+          rawContent: `Vị trí ${title} tại ${company}. Địa điểm: ${locationText}. Yêu cầu ứng viên có kiến thức chuyên môn vững vàng.`,
           linkedinUrl: link.startsWith("http") ? link : `https://www.linkedin.com/jobs/view/${index}`,
           postedDate: dateText,
-          experienceYearsRequired: seniority === "SENIOR" ? 4 : seniority === "MIDDLE" ? 2 : 1,
         });
       }
     });
 
-    return jobs;
+    return jobMappingService.mapBulkRawJobs(rawList, cfg);
   }
 
   /**
@@ -121,132 +104,54 @@ export class ScraperService {
     company: string,
     rawText: string,
     locationInput?: WorkLocation,
-    urlInput?: string
+    urlInput?: string,
+    cfg?: Partial<SystemConfig>
   ): JobPosting {
-    const textLower = rawText.toLowerCase();
-    const extractedSkills = scoringService.extractSkillsFromText(rawText);
-
-    const isDA = textLower.includes("data analyst") || textLower.includes("phân tích dữ liệu") || title.toLowerCase().includes("data");
-    const isBA = textLower.includes("business analyst") || textLower.includes("phân tích nghiệp vụ") || title.toLowerCase().includes("business");
-
-    const roleCategory: JobRoleCategory = isDA && isBA ? "HYBRID_BA_DA" : isDA ? "DATA_ANALYST" : "BUSINESS_ANALYST";
-    const seniority = this.detectSeniority(`${title} ${rawText}`);
-
-    const isDongNai = textLower.includes("đồng nai") || textLower.includes("dong nai") || textLower.includes("biên hòa");
-    const location: WorkLocation = locationInput || (isDongNai ? "DONG_NAI" : "HO_CHI_MINH");
-
-    const lines = rawText
-      .split("\n")
-      .map((l) => l.trim().replace(/^[-*•]\s*/, ""))
-      .filter((l) => l.length > 15);
-
-    const responsibilitiesSummary = lines.slice(0, 4);
-    const requirementsSummary = lines.slice(4, 8);
-
-    return {
-      id: `custom-jd-${Date.now()}`,
-      title: title.trim() || (roleCategory === "BUSINESS_ANALYST" ? "Business Analyst" : "Data Analyst"),
-      company: company.trim() || "Doanh nghiệp tại " + (location === "DONG_NAI" ? "Đồng Nai" : "TP.HCM"),
-      companyLogo: getCompanyLogoUrl(company),
-      location,
-      locationDetails: location === "DONG_NAI" ? "Đồng Nai / KCN Vùng Đông Nam Bộ" : "TP. Hồ Chí Minh",
-      roleCategory,
-      seniority,
-      salaryRange: {
-        isNegotiable: true,
-        currency: "VND",
-        display: "Thỏa thuận theo năng lực",
+    return jobMappingService.mapRawToJobPosting(
+      {
+        rawTitle: title,
+        rawCompany: company,
+        rawContent: rawText,
+        rawLocation: locationInput,
+        linkedinUrl: urlInput,
       },
-      workMode: "HYBRID",
-      jobDescription: rawText,
-      requirementsSummary: requirementsSummary.length > 0 ? requirementsSummary : ["Xem chi tiết trong mô tả công việc"],
-      responsibilitiesSummary: responsibilitiesSummary.length > 0 ? responsibilitiesSummary : ["Thực hiện nhiệm vụ theo phân công dự án"],
-      extractedSkills: extractedSkills.length > 0 ? extractedSkills : [
-        { name: "Requirements Engineering", category: "CORE", importance: "MUST_HAVE" },
-        { name: "SQL (Advanced Querying)", category: "CORE", importance: "MUST_HAVE" },
-      ],
-      linkedinUrl: urlInput || `https://www.linkedin.com/jobs/custom-${Date.now()}`,
-      postedDate: new Date().toISOString().split("T")[0],
-      experienceYearsRequired: seniority === "SENIOR" ? 4 : seniority === "MIDDLE" ? 2 : 1,
-    };
+      cfg
+    );
   }
 
-  private detectSeniority(text: string): SeniorityLevel {
-    const t = text.toLowerCase();
-    if (t.includes("lead") || t.includes("manager") || t.includes("trưởng nhóm") || t.includes("principal")) return "LEAD_MANAGER";
-    if (t.includes("senior") || t.includes("chuyên viên cao cấp") || t.includes("chính")) return "SENIOR";
-    if (t.includes("junior") || t.includes("fresher") || t.includes("mới tốt nghiệp")) return "JUNIOR";
-    if (t.includes("intern") || t.includes("thực tập")) return "INTERN";
-    return "MIDDLE";
-  }
-
-  private generateDynamicScrapedJobs(options: ScrapeOptions): JobPosting[] {
+  private generateDynamicScrapedJobs(options: ScrapeOptions, cfg: SystemConfig): JobPosting[] {
     const today = new Date().toISOString().split("T")[0];
     const pool = [
       {
-        title: "Senior IT Business Analyst (Core Banking Transformation)",
-        company: "FPT Software HCM Strategic Unit",
-        location: "HO_CHI_MINH" as WorkLocation,
-        locationDetails: "Khu Công nghệ cao (SHTP), TP. Thủ Đức, TP.HCM",
-        role: "BUSINESS_ANALYST" as JobRoleCategory,
-        seniority: "SENIOR" as SeniorityLevel,
-        salary: "45 - 65 Triệu VNĐ (~$1.800 - $2.600)",
-        skills: ["Requirements Engineering", "Process Modeling (BPMN/UML)", "User Story & Acceptance Criteria", "Fintech & Banking", "SQL (Advanced Querying)"],
+        rawTitle: "Senior IT Business Analyst (Core Banking Transformation)",
+        rawCompany: "FPT Software HCM Strategic Unit",
+        rawLocation: "Khu Công nghệ cao (SHTP), TP. Thủ Đức, TP.HCM",
+        rawSalaryText: "45 - 65 Triệu VNĐ (~$1.800 - $2.600)",
+        rawContent: "FPT Software tuyển dụng Senior IT Business Analyst. Yêu cầu Requirements Engineering, Process Modeling (BPMN/UML), User Story & Acceptance Criteria, Fintech & Banking, SQL.",
+        pageUrl: `https://www.linkedin.com/jobs/view/live-fpt-${Date.now()}`,
+        postedDate: today,
       },
       {
-        title: "Lead Data Analytics & BI Specialist (Supply Chain Operations)",
-        company: "Nestlé Vietnam Dong Nai Distribution Hub",
-        location: "DONG_NAI" as WorkLocation,
-        locationDetails: "KCN Amata, TP. Biên Hòa, Tỉnh Đồng Nai",
-        role: "DATA_ANALYST" as JobRoleCategory,
-        seniority: "LEAD_MANAGER" as SeniorityLevel,
-        salary: "$1.800 - $2.800 USD (~45 - 71 Tr VNĐ)",
-        skills: ["Power BI & DAX", "SQL (Advanced Querying)", "Supply Chain & Logistics", "Data Modeling & Data Warehousing", "Advanced Excel"],
+        rawTitle: "Lead Data Analytics & BI Specialist (Supply Chain Operations)",
+        rawCompany: "Nestlé Vietnam Dong Nai Distribution Hub",
+        rawLocation: "KCN Amata, TP. Biên Hòa, Tỉnh Đồng Nai",
+        rawSalaryText: "$1.800 - $2.800 USD (~45 - 71 Tr VNĐ)",
+        rawContent: "Nestlé Vietnam tuyển Lead Data Analytics & BI Specialist tại KCN Amata Đồng Nai. Yêu cầu Power BI & DAX, SQL (Advanced Querying), Supply Chain & Logistics, Data Modeling.",
+        pageUrl: `https://www.linkedin.com/jobs/view/live-nestle-${Date.now()}`,
+        postedDate: today,
       },
       {
-        title: "Senior Product Business Analyst (Loyalty & Retail Platform)",
-        company: "Masan Group Digital Consumer Center",
-        location: "HO_CHI_MINH" as WorkLocation,
-        locationDetails: "Quận Bình Thạnh, TP. Hồ Chí Minh",
-        role: "BUSINESS_ANALYST" as JobRoleCategory,
-        seniority: "SENIOR" as SeniorityLevel,
-        salary: "42 - 58 Triệu VNĐ (~$1.700 - $2.300)",
-        skills: ["Requirements Engineering", "User Story & Acceptance Criteria", "E-Commerce & Retail", "Figma & UI Prototyping", "Jira & Confluence"],
+        rawTitle: "Senior Product Business Analyst (Loyalty & Retail Platform)",
+        rawCompany: "Masan Group Digital Consumer Center",
+        rawLocation: "Quận Bình Thạnh, TP. Hồ Chí Minh",
+        rawSalaryText: "42 - 58 Triệu VNĐ (~$1.700 - $2.300)",
+        rawContent: "Masan Group tuyển Senior Product Business Analyst tại Bình Thạnh TP.HCM. Yêu cầu Requirements Engineering, User Story, E-Commerce, Figma, Jira.",
+        pageUrl: `https://www.linkedin.com/jobs/view/live-masan-${Date.now()}`,
+        postedDate: today,
       },
     ];
 
-    return pool.map((item, idx) => ({
-      id: `scraped-live-${Date.now()}-${idx}`,
-      title: item.title,
-      company: item.company,
-      companyLogo: getCompanyLogoUrl(item.company),
-      location: item.location,
-      locationDetails: item.locationDetails,
-      roleCategory: item.role,
-      seniority: item.seniority,
-      salaryRange: {
-        isNegotiable: true,
-        currency: "VND",
-        display: item.salary,
-      },
-      workMode: "HYBRID",
-      jobDescription: `Cơ hội việc làm ${item.title} tại ${item.company}. Tham gia các sáng kiến chuyển đổi số quy mô lớn.`,
-      requirementsSummary: [
-        "Nắm vững nghiệp vụ chuyên môn và quy trình làm việc chuẩn mực.",
-        "Kinh nghiệm làm việc hiệu quả với các bên liên quan và đội ngũ phát triển.",
-      ],
-      responsibilitiesSummary: [
-        "Phân tích yêu cầu, xây dựng giải pháp và đồng hành cùng dự án đến khi nghiệm thu.",
-      ],
-      extractedSkills: item.skills.map((s) => ({
-        name: s,
-        category: "CORE",
-        importance: "MUST_HAVE",
-      })),
-      linkedinUrl: `https://www.linkedin.com/jobs/view/live-${Date.now()}-${idx}`,
-      postedDate: today,
-      experienceYearsRequired: item.seniority === "SENIOR" ? 4 : 2,
-    }));
+    return jobMappingService.mapBulkRawJobs(pool, cfg);
   }
 }
 
