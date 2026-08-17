@@ -1,0 +1,108 @@
+import { ApplicationRecord, CandidateProfile } from "../dtos/profile.dto";
+import { StorageHelper } from "../utils/storage-helper";
+
+const PROFILE_STORAGE_FILE = "profile.json";
+const APPLICATIONS_STORAGE_FILE = "applications.json";
+
+export const INITIAL_EMPTY_PROFILE: CandidateProfile = {
+  id: "candidate-primary",
+  fullName: "Hồ Sơ Ứng Viên",
+  targetRole: "BUSINESS_ANALYST",
+  currentSeniority: "SENIOR",
+  preferredLocations: ["HO_CHI_MINH", "DONG_NAI"],
+  expectedSalaryVND: 40000000,
+  yearsOfTotalExperience: 4,
+  education: "",
+  certifications: [],
+  skills: [
+    { name: "Requirements Engineering", category: "CORE", proficiencyLevel: 5, yearsOfExperience: 4 },
+    { name: "Process Modeling (BPMN/UML)", category: "CORE", proficiencyLevel: 5, yearsOfExperience: 4 },
+    { name: "User Story & Acceptance Criteria", category: "CORE", proficiencyLevel: 5, yearsOfExperience: 4 },
+    { name: "SQL (Advanced Querying)", category: "CORE", proficiencyLevel: 5, yearsOfExperience: 4 },
+    { name: "Power BI & DAX", category: "TOOL", proficiencyLevel: 4, yearsOfExperience: 3 },
+    { name: "Data Modeling & Data Warehousing", category: "CORE", proficiencyLevel: 4, yearsOfExperience: 3 },
+    { name: "Jira & Confluence", category: "TOOL", proficiencyLevel: 5, yearsOfExperience: 4 },
+    { name: "Stakeholder Management", category: "SOFT_SKILL", proficiencyLevel: 5, yearsOfExperience: 4 },
+    { name: "UAT & Solution Evaluation", category: "CORE", proficiencyLevel: 5, yearsOfExperience: 4 },
+  ],
+  rawResumeText: "",
+  lastUpdated: new Date().toISOString(),
+};
+
+export class ProfileRepository {
+  private currentProfile: CandidateProfile;
+  private applications: ApplicationRecord[];
+
+  constructor() {
+    this.currentProfile = StorageHelper.readJson<CandidateProfile>(
+      PROFILE_STORAGE_FILE,
+      INITIAL_EMPTY_PROFILE
+    );
+    this.applications = StorageHelper.readJson<ApplicationRecord[]>(
+      APPLICATIONS_STORAGE_FILE,
+      []
+    );
+  }
+
+  private persistProfile(): void {
+    StorageHelper.writeJson(PROFILE_STORAGE_FILE, this.currentProfile);
+  }
+
+  private persistApplications(): void {
+    StorageHelper.writeJson(APPLICATIONS_STORAGE_FILE, this.applications);
+  }
+
+  public getProfile(): CandidateProfile {
+    return { ...this.currentProfile };
+  }
+
+  public updateProfile(updated: Partial<CandidateProfile>): CandidateProfile {
+    this.currentProfile = {
+      ...this.currentProfile,
+      ...updated,
+      lastUpdated: new Date().toISOString(),
+    };
+    this.persistProfile();
+    return { ...this.currentProfile };
+  }
+
+  public getApplications(): ApplicationRecord[] {
+    return [...this.applications];
+  }
+
+  public saveOrUpdateApplication(record: Omit<ApplicationRecord, "id"> & { id?: string }): ApplicationRecord {
+    const existingIndex = this.applications.findIndex((a) => a.jobId === record.jobId);
+    if (existingIndex >= 0) {
+      this.applications[existingIndex] = {
+        ...this.applications[existingIndex],
+        ...record,
+      };
+      this.persistApplications();
+      return this.applications[existingIndex];
+    } else {
+      const newRecord: ApplicationRecord = {
+        id: record.id || `app-${Date.now()}`,
+        jobId: record.jobId,
+        appliedDate: record.appliedDate || new Date().toISOString().split("T")[0],
+        status: record.status || "SAVED",
+        matchScoreAtApply: record.matchScoreAtApply || 0,
+        notes: record.notes || "",
+      };
+      this.applications.unshift(newRecord);
+      this.persistApplications();
+      return newRecord;
+    }
+  }
+
+  public removeApplication(jobId: string): boolean {
+    const initialLength = this.applications.length;
+    this.applications = this.applications.filter((a) => a.jobId !== jobId);
+    if (this.applications.length < initialLength) {
+      this.persistApplications();
+      return true;
+    }
+    return false;
+  }
+}
+
+export const profileRepository = new ProfileRepository();

@@ -9,11 +9,11 @@
       box-sizing: border-box;
       margin: 0;
       padding: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
     body {
       width: 360px;
-      min-height: 420px;
+      min-height: 440px;
       background-color: #0F172A;
       color: #F8FAFC;
       font-size: 13px;
@@ -26,7 +26,7 @@
       justify-content: space-between;
       border-bottom: 1px solid #334155;
       padding-bottom: 12px;
-      margin-bottom: 14px;
+      margin-bottom: 12px;
     }
     .brand-title {
       font-size: 14px;
@@ -69,7 +69,7 @@
       border: 1px solid #334155;
       border-radius: 8px;
       padding: 12px;
-      margin-bottom: 12px;
+      margin-bottom: 10px;
     }
     .card-title {
       font-size: 11px;
@@ -77,68 +77,25 @@
       text-transform: uppercase;
       letter-spacing: 0.5px;
       color: #94A3B8;
-      margin-bottom: 8px;
+      margin-bottom: 6px;
     }
-    .job-preview {
+    .crawler-stats {
       display: flex;
-      gap: 10px;
-      align-items: flex-start;
-    }
-    .job-logo {
-      width: 42px;
-      height: 42px;
-      border-radius: 6px;
-      background-color: #FFFFFF;
-      border: 1px solid #475569;
-      object-fit: contain;
-      flex-shrink: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 700;
-      color: #1E293B;
-      font-size: 14px;
-      padding: 2px;
-    }
-    .job-info {
-      flex: 1;
-      min-width: 0;
-    }
-    .job-name {
-      font-weight: 700;
-      color: #F8FAFC;
-      font-size: 13px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .job-company {
+      justify-content: space-between;
       font-size: 12px;
       color: #CBD5E1;
-      margin-top: 2px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      padding: 6px 0;
+      border-top: 1px solid #334155;
+      margin-top: 6px;
     }
-    .job-meta {
-      font-size: 11px;
-      color: #94A3B8;
-      margin-top: 4px;
-    }
-    .empty-state {
-      text-align: center;
-      padding: 12px 6px;
-      color: #94A3B8;
-      font-size: 12px;
-    }
-    .actions {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
+    .crawler-stats span.val {
+      font-weight: 700;
+      color: #38BDF8;
+      font-family: monospace;
     }
     .btn {
       width: 100%;
-      padding: 10px 14px;
+      padding: 9px 14px;
       border-radius: 6px;
       font-size: 12px;
       font-weight: 700;
@@ -150,22 +107,56 @@
       gap: 6px;
       transition: all 0.15s ease;
     }
+    .btn-auto {
+      background: linear-gradient(135deg, #7C3AED 0%, #4C1D95 100%);
+      color: #FFFFFF;
+      border: 1px solid #A78BFA;
+      box-shadow: 0 4px 10px rgba(124, 58, 237, 0.4);
+    }
+    .btn-auto:hover {
+      background: linear-gradient(135deg, #6D28D9 0%, #3B0764 100%);
+    }
+    .btn-stop {
+      background-color: #DC2626 !important;
+      color: #FFFFFF !important;
+      border: 1px solid #EF4444 !important;
+    }
+    .btn-passive {
+      background-color: #082F49;
+      color: #38BDF8;
+      border: 1px solid #0EA5E9;
+    }
+    .btn-passive.off {
+      background-color: #1E293B;
+      color: #94A3B8;
+      border-color: #475569;
+    }
+    .btn-autoopen {
+      background-color: #3B0764;
+      color: #D8B4FE;
+      border: 1px solid #A855F7;
+      margin-top: 6px;
+      font-size: 11px;
+      padding: 7px 12px;
+    }
+    .btn-autoopen.off {
+      background-color: #1E293B;
+      color: #94A3B8;
+      border-color: #475569;
+    }
+    .btn:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
     .btn-primary {
       background-color: #4F46E5;
       color: #FFFFFF;
       border: 1px solid #6366F1;
-      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
-    }
-    .btn-primary:hover {
-      background-color: #4338CA;
     }
     .btn-secondary {
       background-color: #334155;
       color: #F8FAFC;
       border: 1px solid #475569;
-    }
-    .btn-secondary:hover {
-      background-color: #475569;
     }
     .btn-link {
       background: none;
@@ -190,10 +181,10 @@
       border-color: #6366F1;
     }
     .alert {
-      padding: 10px 12px;
+      padding: 8px 10px;
       border-radius: 6px;
-      font-size: 12px;
-      margin-top: 10px;
+      font-size: 11px;
+      margin-top: 8px;
       display: none;
       line-height: 1.4;
     }
@@ -213,7 +204,7 @@
   <div class="header">
     <div>
       <div class="brand-title">Job Hunter Extractor</div>
-      <div class="brand-subtitle">Dynamic Ingestion & Mapping</div>
+      <div class="brand-subtitle">Continuous Auto-Crawler V3</div>
     </div>
     <div id="statusBadge" class="status-badge">
       <span id="statusDot" class="status-dot"></span>
@@ -221,41 +212,64 @@
     </div>
   </div>
 
-  <div class="card">
-    <div class="card-title">Tin tuyển dụng phát hiện</div>
-    <div id="jobContainer">
-      <div class="empty-state" id="emptyState">
-        Đang quét dữ liệu từ trang LinkedIn hiện tại...
-      </div>
-      <div class="job-preview" id="jobPreview" style="display: none;">
-        <img id="jobLogoImg" class="job-logo" src="" alt="Logo" style="display: none;" />
-        <div id="jobLogoFallback" class="job-logo">JH</div>
-        <div class="job-info">
-          <div class="job-name" id="jobTitle">Tiêu đề công việc</div>
-          <div class="job-company" id="jobCompany">Tên công ty</div>
-          <div class="job-meta" id="jobMeta">Địa điểm | Lương</div>
-        </div>
-      </div>
+  <div class="card" style="border-color: #7C3AED;">
+    <div class="card-title" style="color: #A78BFA;">Cào Tự Động Toàn Bộ Trang (Auto-Crawler)</div>
+    <button id="btnToggleAutoCrawl" class="btn btn-auto">
+      Bật Cào Tự Động Liên Tục
+    </button>
+    <div id="crawlerHint" style="color: #64748B; font-size: 10px; margin-top: 6px; line-height: 1.4;">
+      Đang ở tab LinkedIn thì cào ngay trên tab đó; ở tab khác thì Extension tự mở tab LinkedIn mới.
+    </div>
+    <div id="crawlerInfo" class="crawler-stats" style="display: none;">
+      <div>Trang hiện tại: <span id="statPage" class="val">1</span></div>
+      <div>Đã lưu: <span id="statCount" class="val">0</span> việc làm</div>
+    </div>
+  </div>
+
+  <div class="card" style="border-color: #0EA5E9;">
+    <div class="card-title" style="color: #38BDF8;">Chế Độ Ghi (Thu Thập Theo Cuộn)</div>
+    <button id="btnTogglePassive" class="btn btn-passive off">
+      Chế độ ghi: ĐANG TẮT
+    </button>
+    <button id="btnToggleAutoOpen" class="btn btn-autoopen off" disabled>
+      Tự mở JD khi cuộn: ĐANG TẮT
+    </button>
+    <div style="color: #64748B; font-size: 10px; margin-top: 6px; line-height: 1.4;">
+      <b style="color:#94A3B8;">Tắt cả hai:</b> Extension không ghi gì.<br />
+      <b style="color:#38BDF8;">Chỉ chế độ ghi:</b> chỉ lưu việc làm bạn tự bấm mở.<br />
+      <b style="color:#D8B4FE;">Bật thêm tự mở JD:</b> thẻ nào dừng trong tầm nhìn thì Extension tự mở rồi lưu.<br />
+      Tự tắt khi xong: im lặng 2 phút, rời danh sách việc làm, hoặc đóng tab LinkedIn cuối.
+    </div>
+    <div class="crawler-stats">
+      <div>Đã ghi mẻ này: <span id="statPassive" class="val">0</span> việc làm</div>
     </div>
   </div>
 
   <div class="card">
-    <div class="card-title">Cấu hình Máy chủ (Dynamic Server URL)</div>
-    <input type="text" id="inputServerUrl" class="server-config-input" value="http://localhost:3000" placeholder="http://localhost:3000" />
-    <button id="btnSaveServerUrl" class="btn btn-secondary" style="padding: 5px 10px; font-size: 11px;">
-      Lưu cấu hình máy chủ
+    <div class="card-title">Tin tuyển dụng đang mở</div>
+    <div id="emptyState" style="color: #94A3B8; font-size: 11px;">
+      Mở tab LinkedIn bất kỳ để lấy dữ liệu.
+    </div>
+    <div id="jobPreview" style="display: none;">
+      <div id="jobTitle" style="font-weight: 700; font-size: 12px; color: #FFF; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Tiêu đề</div>
+      <div id="jobCompany" style="font-size: 11px; color: #94A3B8;">Công ty</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Địa chỉ Dashboard</div>
+    <input type="text" id="inputServerUrl" class="server-config-input" value="http://localhost:3000" />
+    <button id="btnSaveServerUrl" class="btn btn-secondary" style="padding: 4px 8px; font-size: 10px;">
+      Lưu cấu hình
     </button>
   </div>
 
-  <div class="actions">
-    <button id="btnSyncCurrent" class="btn btn-primary">
-      Đồng bộ công việc này vào Dashboard
-    </button>
-    <button id="btnScanAll" class="btn btn-secondary">
-      Quét tất cả việc làm trên trang
+  <div style="display: flex; flex-direction: column; gap: 6px;">
+    <button id="btnSyncCurrent" class="btn btn-primary" style="font-size: 11px; padding: 7px 10px;">
+      Đồng bộ chỉ 1 việc làm này
     </button>
     <button id="btnOpenDashboard" class="btn btn-link">
-      Mở Dashboard ứng dụng
+      Mở Dashboard (http://localhost:3000)
     </button>
   </div>
 

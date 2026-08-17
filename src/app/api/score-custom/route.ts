@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { jobService } from "@/core/services/job-service";
 
+
+// Route chạm database qua SSH tunnel -> không được prerender lúc build
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -13,7 +17,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const scoredJob = jobService.scoreCustomJD(
+    const scoredJob = await jobService.scoreCustomJD(
       title || "Business / Data Analyst",
       company || "Doanh nghiệp",
       rawText,

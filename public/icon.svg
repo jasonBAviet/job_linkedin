@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="50%" stop-color="#1e1b4b"/>
+      <stop offset="100%" stop-color="#090d16"/>
+    </linearGradient>
+    <linearGradient id="primaryGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="50%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#a855f7"/>
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#06b6d4"/>
+      <stop offset="100%" stop-color="#3b82f6"/>
+    </linearGradient>
+    <linearGradient id="borderGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.8"/>
+      <stop offset="50%" stop-color="#6366f1" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#a855f7" stop-opacity="0.8"/>
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="12" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Background Base with Rounded Corners -->
+  <rect width="512" height="512" rx="128" fill="url(#bgGrad)"/>
+  <rect width="504" height="504" x="4" y="4" rx="124" fill="none" stroke="url(#borderGrad)" stroke-width="8"/>
+
+  <!-- Subtle Target Radar Circle -->
+  <circle cx="256" cy="256" r="168" fill="none" stroke="#334155" stroke-width="6" stroke-dasharray="12 12" opacity="0.6"/>
+  <circle cx="256" cy="256" r="112" fill="none" stroke="#475569" stroke-width="4" opacity="0.4"/>
+
+  <!-- Central Target Crosshair Guides -->
+  <line x1="256" y1="56" x2="256" y2="104" stroke="#38bdf8" stroke-width="8" stroke-linecap="round"/>
+  <line x1="256" y1="408" x2="256" y2="456" stroke="#38bdf8" stroke-width="8" stroke-linecap="round"/>
+  <line x1="56" y1="256" x2="104" y2="256" stroke="#38bdf8" stroke-width="8" stroke-linecap="round"/>
+  <line x1="408" y1="256" x2="456" y2="256" stroke="#38bdf8" stroke-width="8" stroke-linecap="round"/>
+
+  <!-- Main Symbol: BA/DA Job Hunter Emblem (Analytics Chart + Target Node) -->
+  <g filter="url(#glow)">
+    <!-- Bar 1 (Left - Foundation Data) -->
+    <rect x="148" y="272" width="44" height="100" rx="12" fill="url(#accentGrad)"/>
+    
+    <!-- Bar 2 (Middle - Growth / Senior BA) -->
+    <rect x="214" y="196" width="44" height="176" rx="12" fill="url(#primaryGrad)"/>
+
+    <!-- Bar 3 (Right - Target / Lead DA) -->
+    <rect x="280" y="132" width="44" height="240" rx="12" fill="url(#primaryGrad)"/>
+
+    <!-- Trend line / Arrow linking metrics to job hunting target -->
+    <path d="M 132 290 L 210 216 L 276 156 L 366 112" fill="none" stroke="#38bdf8" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+    
+    <!-- Target Point on Top Right -->
+    <circle cx="366" cy="112" r="18" fill="#38bdf8"/>
+    <circle cx="366" cy="112" r="8" fill="#ffffff"/>
+  </g>
+</svg>

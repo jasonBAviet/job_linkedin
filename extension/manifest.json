@@ -1,17 +1,22 @@
 {
   "manifest_version": 3,
   "name": "LinkedIn Job Hunter Extractor",
-  "version": "1.0.1",
+  "version": "1.2.0",
   "description": "Trích xuất và đồng bộ dữ liệu tin tuyển dụng thực tế từ LinkedIn về ứng dụng Job Hunter HCM & Đồng Nai.",
   "permissions": [
     "activeTab",
     "scripting",
-    "tabs"
+    "tabs",
+    "storage"
   ],
   "host_permissions": [
     "*://*.linkedin.com/*",
-    "http://localhost:3000/*",
-    "http://127.0.0.1:3000/*"
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
   ],
   "action": {
     "default_popup": "popup.html",
@@ -23,20 +28,40 @@
         "*://*.linkedin.com/*"
       ],
       "js": [
+        "lib/text.js",
+        "lib/selectors.js",
+        "lib/anti-detection.js",
+        "lib/job-extractor.js",
+        "lib/floating-ui.js",
+        "lib/passive-harvester.js",
+        "lib/crawl-state.js",
         "content.js"
       ],
       "run_at": "document_end",
+      "all_frames": false
+    },
+    {
+      "matches": [
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ],
+      "js": [
+        "bridge.js"
+      ],
+      "run_at": "document_start",
       "all_frames": false
     }
   ],
   "background": {
     "service_worker": "background.js",
-    "scripts": ["background.js"]
+    "scripts": [
+      "background.js"
+    ]
   },
   "browser_specific_settings": {
     "gecko": {
       "id": "linkedin-job-hunter-extractor@antigravity.local",
-      "strict_min_version": "109.0"
+      "strict_min_version": "115.0"
     }
   }
 }

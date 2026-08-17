@@ -2,8 +2,9 @@
 
 import React from "react";
 import { MapPin, DollarSign, ExternalLink, ArrowRight, Building2, Check, Bookmark } from "lucide-react";
-import { JobWithScore } from "@/core/services/job-service";
+import type { JobWithScore } from "@/core/dtos/job-with-score.dto";
 import { MatchScoreBadge } from "../scoring/MatchScoreBadge";
+import { CompetitionBadge } from "./CompetitionBadge";
 
 interface JobCardProps {
   job: JobWithScore;
@@ -28,7 +29,7 @@ export const JobCard: React.FC<JobCardProps> = ({
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-start gap-3.5">
             {/* Company Avatar / Logo */}
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white border border-slate-200 overflow-hidden text-slate-700 font-bold text-base p-1.5 shadow-2xs">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white overflow-hidden text-slate-700 font-bold text-base p-1.5 shadow-2xs">
               {job.companyLogo ? (
                 <img
                   src={job.companyLogo}
@@ -64,7 +65,7 @@ export const JobCard: React.FC<JobCardProps> = ({
           </div>
         </div>
 
-        {/* Badges: Location, Seniority, Salary */}
+        {/* Badges: Location, Seniority, Salary, Competition */}
         <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
           {/* Location Badge */}
           <span
@@ -94,6 +95,15 @@ export const JobCard: React.FC<JobCardProps> = ({
               {job.salaryRange.display}
             </span>
           )}
+
+          {/* Competition Badge */}
+          <CompetitionBadge
+            competitionLevel={job.competitionLevel}
+            applicantCountText={job.applicantCountText}
+            isPromoted={job.isPromoted}
+            responsesManagedOffLinkedIn={job.responsesManagedOffLinkedIn}
+            size="sm"
+          />
 
           {/* Work mode */}
           <span className="text-[11px] text-slate-500">
@@ -133,9 +143,14 @@ export const JobCard: React.FC<JobCardProps> = ({
       </div>
 
       {/* Card Footer Actions */}
-      <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3">
-        <div className="text-[11px] text-slate-400">
-          Đăng ngày: {job.postedDate}
+      <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3 text-[11px] text-slate-400">
+        <div className="flex flex-col">
+          <span>Đăng ngày: {job.postedDate}</span>
+          {job.crawledAt && (
+            <span className="text-[10px] text-slate-500 font-mono">
+              Cào lúc: {new Date(job.crawledAt).toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-2">

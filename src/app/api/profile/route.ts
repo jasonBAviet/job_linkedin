@@ -2,9 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { profileRepository } from "@/core/repositories/profile-repository";
 import { scoringService } from "@/core/services/scoring-service";
 
+
+// Route chạm database qua SSH tunnel -> không được prerender lúc build
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 export async function GET() {
   try {
-    const profile = profileRepository.getProfile();
+    const profile = await profileRepository.getProfile();
     return NextResponse.json({
       success: true,
       data: profile,
@@ -20,7 +24,7 @@ export async function GET() {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const updated = profileRepository.updateProfile(body);
+    const updated = await profileRepository.updateProfile(body);
 
     return NextResponse.json({
       success: true,
@@ -46,7 +50,7 @@ export async function POST(request: NextRequest) {
     }
 
     const extractedSkills = scoringService.extractSkillsFromText(rawResume);
-    const currentProfile = profileRepository.getProfile();
+    const currentProfile = await profileRepository.getProfile();
 
     const existingSkillNames = new Set(currentProfile.skills.map((s) => s.name.toLowerCase()));
     const newSkillsToAdd = extractedSkills
@@ -58,7 +62,7 @@ export async function POST(request: NextRequest) {
         yearsOfExperience: 2,
       }));
 
-    const updatedProfile = profileRepository.updateProfile({
+    const updatedProfile = await profileRepository.updateProfile({
       rawResumeText: rawResume,
       skills: [...currentProfile.skills, ...newSkillsToAdd],
     });

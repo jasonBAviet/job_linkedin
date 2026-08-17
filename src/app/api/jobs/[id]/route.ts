@@ -1,13 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { jobService } from "@/core/services/job-service";
 
+
+// Route chạm database qua SSH tunnel -> không được prerender lúc build
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await params;
-    const jobWithScore = jobService.getJobDetailWithScore(id);
+    const jobWithScore = await jobService.getJobDetailWithScore(id);
 
     if (!jobWithScore) {
       return NextResponse.json(

@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { BookmarkCheck, Building2, MapPin, Trash2, ExternalLink, RefreshCw } from "lucide-react";
 import { ApplicationRecord } from "@/core/dtos/profile.dto";
-import { JobWithScore } from "@/core/services/job-service";
+import type { JobWithScore } from "@/core/dtos/job-with-score.dto";
 import { MatchScoreBadge } from "@/components/scoring/MatchScoreBadge";
 
 interface PopulatedApplication extends ApplicationRecord {
@@ -116,7 +116,7 @@ export default function ApplicationsPage() {
                 className="w-full flex flex-col sm:flex-row sm:items-center justify-between rounded-lg border border-slate-800 bg-slate-900 p-3 shadow-xs hover:border-slate-700 transition-all gap-2.5"
               >
                 <div className="flex items-start gap-2.5 min-w-0">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-white border border-slate-700 overflow-hidden mt-0.5 p-0.5">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-white overflow-hidden mt-0.5 p-0.5">
                     {job?.companyLogo ? (
                       <img
                         src={job.companyLogo}

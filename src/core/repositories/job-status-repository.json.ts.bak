@@ -1,0 +1,72 @@
+import { JobUserStatus } from "../dtos/job.dto";
+import { StorageHelper } from "../utils/storage-helper";
+
+const STATUS_FILE = "job-status.json";
+
+export interface JobStatusEntry {
+  status: JobUserStatus;
+  updatedAt: string;
+}
+
+type StatusMap = Record<string, JobStatusEntry>;
+
+export class JobStatusRepository {
+  private statusMap: StatusMap;
+
+  constructor() {
+    this.statusMap = StorageHelper.readJson<StatusMap>(STATUS_FILE, {});
+  }
+
+  private persist(): void {
+    StorageHelper.writeJson(STATUS_FILE, this.statusMap);
+  }
+
+  /** Lay trang thai cua 1 job, mac dinh NEW */
+  public getStatus(jobId: string): JobUserStatus {
+    return this.statusMap[jobId]?.status || "NEW";
+  }
+
+  /** Dat trang thai cho 1 job */
+  public setStatus(jobId: string, status: JobUserStatus): void {
+    if (status === "NEW") {
+      delete this.statusMap[jobId];
+    } else {
+      this.statusMap[jobId] = {
+        status,
+        updatedAt: new Date().toISOString(),
+      };
+    }
+    this.persist();
+  }
+
+  /** Lay toan bo status map */
+  public getAll(): StatusMap {
+    return { ...this.statusMap };
+  }
+
+  /** Lay danh sach jobId theo trang thai cu the */
+  public getByStatus(status: JobUserStatus): string[] {
+    if (status === "NEW") {
+      return [];
+    }
+    return Object.entries(this.statusMap)
+      .filter(([, entry]) => entry.status === status)
+      .map(([jobId]) => jobId);
+  }
+
+  /** Dem so luong tung trang thai */
+  public getCounts(): Record<JobUserStatus, number> {
+    const counts: Record<JobUserStatus, number> = {
+      NEW: 0,
+      SAVED: 0,
+      VIEWED: 0,
+      HIDDEN: 0,
+    };
+    for (const entry of Object.values(this.statusMap)) {
+      counts[entry.status] = (counts[entry.status] || 0) + 1;
+    }
+    return counts;
+  }
+}
+
+export const jobStatusRepository = new JobStatusRepository();

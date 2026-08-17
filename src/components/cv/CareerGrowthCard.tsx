@@ -2,8 +2,8 @@
 
 import React from "react";
 import { TrendingUp, ArrowUpRight, ShieldAlert, Sparkles, Building2, MapPin, DollarSign, Eye } from "lucide-react";
-import { CareerGrowthJob } from "@/core/services/cv-matcher-service";
-import { JobWithScore } from "@/core/services/job-service";
+import type { CareerGrowthJob } from "@/core/dtos/job-with-score.dto";
+import type { JobWithScore } from "@/core/dtos/job-with-score.dto";
 
 interface CareerGrowthCardProps {
   growthItem: CareerGrowthJob;
@@ -32,7 +32,7 @@ export const CareerGrowthCard: React.FC<CareerGrowthCardProps> = ({ growthItem, 
       {/* Top row */}
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="flex items-start gap-2.5 min-w-0">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-white border border-slate-700 overflow-hidden mt-0.5 p-0.5">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-white overflow-hidden mt-0.5 p-0.5">
             {job.companyLogo ? (
               <img
                 src={job.companyLogo}

@@ -1,0 +1,261 @@
+import { DatePostedFilter, JobPosting, JobSearchFilters } from "../dtos/job.dto";
+import { StorageHelper } from "../utils/storage-helper";
+import { SalaryExtractor } from "../utils/salary-extractor";
+import { jobStatusRepository } from "./job-status-repository";
+
+const STORAGE_FILE = "jobs.json";
+
+function matchesDatePosted(postedDateStr: string | undefined, filter: DatePostedFilter | undefined): boolean {
+  if (!postedDateStr || !filter || filter === "ALL") return true;
+  const str = postedDateStr.toLowerCase();
+
+  if (filter === "PAST_24H") {
+    if (str.includes("giờ") || str.includes("hour") || str.includes("phút") || str.includes("minute") || str.includes("vừa") || str.includes("just") || str.includes("1 ngày") || str.includes("1 day")) {
+      return true;
+    }
+    return false;
+  }
+
+  if (filter === "PAST_WEEK") {
+    if (str.includes("giờ") || str.includes("hour") || str.includes("phút") || str.includes("minute") || str.includes("vừa") || str.includes("just") || str.includes("1 tuần") || str.includes("1 week")) {
+      return true;
+    }
+    const daysMatch = str.match(/(\d+)\s*(ngày|day)/);
+    if (daysMatch) {
+      return parseInt(daysMatch[1], 10) <= 7;
+    }
+    return false;
+  }
+
+  if (filter === "PAST_MONTH") {
+    if (str.includes("tháng") || str.includes("month")) {
+      const monthMatch = str.match(/(\d+)\s*(tháng|month)/);
+      if (monthMatch) {
+        return parseInt(monthMatch[1], 10) <= 1;
+      }
+      return true;
+    }
+    return true;
+  }
+
+  return true;
+}
+
+export class JobRepository {
+  private jobs: JobPosting[];
+
+  constructor() {
+    this.jobs = StorageHelper.readJson<JobPosting[]>(STORAGE_FILE, []);
+    let updated = false;
+    for (const job of this.jobs) {
+      if (!job.salaryRange) {
+        const extracted = SalaryExtractor.extract(
+          undefined,
+          job.jobDescription || job.rawContent,
+          job.rawBadges,
+          job.title
+        );
+        if (extracted) {
+          job.salaryRange = extracted;
+          updated = true;
+        }
+      }
+    }
+    if (updated) {
+      this.persist();
+    }
+  }
+
+  private persist(): void {
+    StorageHelper.writeJson(STORAGE_FILE, this.jobs);
+  }
+
+  public getAllJobs(): JobPosting[] {
+    return [...this.jobs];
+  }
+
+  public getJobById(id: string): JobPosting | undefined {
+    return this.jobs.find((j) => j.id === id);
+  }
+
+  public filterJobs(filters: JobSearchFilters): JobPosting[] {
+    return this.jobs.filter((job) => {
+      // Lọc theo từ khóa
+      if (filters.keyword && filters.keyword.trim() !== "") {
+        const kw = filters.keyword.toLowerCase().trim();
+        const matchesTitle = job.title.toLowerCase().includes(kw);
+        const matchesCompany = job.company.toLowerCase().includes(kw);
+        const matchesDesc = job.jobDescription.toLowerCase().includes(kw);
+        const matchesSkills = job.extractedSkills.some((s) => s.name.toLowerCase().includes(kw));
+        if (!matchesTitle && !matchesCompany && !matchesDesc && !matchesSkills) {
+          return false;
+        }
+      }
+
+      // Lọc theo tên công ty
+      if (filters.company && filters.company.trim() !== "") {
+        if (!job.company.toLowerCase().includes(filters.company.toLowerCase().trim())) {
+          return false;
+        }
+      }
+
+      // Lọc theo ngày đăng (Date Posted)
+      if (filters.datePosted && filters.datePosted !== "ALL") {
+        if (!matchesDatePosted(job.postedDate, filters.datePosted)) {
+          return false;
+        }
+      }
+
+      // Lọc theo địa điểm
+      if (filters.location && filters.location !== "ALL") {
+        if (job.location !== filters.location) {
+          return false;
+        }
+      }
+
+      // Lọc theo vai trò
+      if (filters.roleCategory && filters.roleCategory !== "ALL") {
+        if (job.roleCategory !== filters.roleCategory && job.roleCategory !== "HYBRID_BA_DA") {
+          return false;
+        }
+      }
+
+      // Lọc theo cấp bậc
+      if (filters.seniority && filters.seniority !== "ALL") {
+        if (filters.seniority === "SENIOR_AND_ABOVE") {
+          if (job.seniority !== "SENIOR" && job.seniority !== "LEAD_MANAGER") {
+            return false;
+          }
+        } else if (job.seniority !== filters.seniority) {
+          return false;
+        }
+      }
+
+      // Lọc theo hình thức làm việc (Work Mode: On-site, Hybrid, Remote)
+      if (filters.workMode && filters.workMode !== "ALL") {
+        if (job.workMode !== filters.workMode) {
+          return false;
+        }
+      }
+
+      // Lọc theo dạng nộp (Easy Apply vs External)
+      if (filters.applyType && filters.applyType !== "ALL") {
+        if (filters.applyType === "EASY_APPLY") {
+          if (!job.isEasyApply && job.applyType !== "EASY_APPLY") {
+            return false;
+          }
+        } else if (filters.applyType === "EXTERNAL_APPLY") {
+          if (job.isEasyApply || job.applyType === "EASY_APPLY") {
+            return false;
+          }
+        }
+      } else if (filters.isEasyApply !== undefined && filters.isEasyApply) {
+        if (!job.isEasyApply) {
+          return false;
+        }
+      }
+
+      // Lọc theo mức độ cạnh tranh (Competition Level)
+      if (filters.competitionLevel && filters.competitionLevel !== "ALL") {
+        if (job.competitionLevel !== filters.competitionLevel) {
+          return false;
+        }
+      }
+
+      // Lọc theo số năm kinh nghiệm tối thiểu
+      if (filters.minExperienceYears !== undefined && filters.minExperienceYears > 0) {
+        if ((job.experienceYearsRequired || 0) < filters.minExperienceYears) {
+          return false;
+        }
+      }
+
+      // Lọc theo mức lương tối thiểu (VND)
+      if (filters.minSalaryVND !== undefined && filters.minSalaryVND > 0) {
+        if (!job.salaryRange || !job.salaryRange.min) {
+          return false;
+        }
+        let salaryInVND = job.salaryRange.min;
+        if (job.salaryRange.currency === "USD") {
+          salaryInVND = job.salaryRange.min * 25400;
+        }
+        if (salaryInVND < filters.minSalaryVND) {
+          return false;
+        }
+      }
+
+      // Lọc có hiển thị mức lương
+      if (filters.hasSalary) {
+        if (!job.salaryRange || !job.salaryRange.min) {
+          return false;
+        }
+      }
+
+      // Loc theo trang thai nguoi dung (Luu/Da xem/An)
+      if (filters.userStatus && filters.userStatus !== "ALL") {
+        const jobStatus = jobStatusRepository.getStatus(job.id);
+        if (jobStatus !== filters.userStatus) {
+          return false;
+        }
+      } else if (!filters.userStatus || filters.userStatus === "ALL") {
+        // Mac dinh: an cac job da bi HIDDEN
+        const jobStatus = jobStatusRepository.getStatus(job.id);
+        if (jobStatus === "HIDDEN") {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }
+
+  public addJob(newJob: JobPosting): JobPosting {
+    const existingIndex = this.jobs.findIndex(
+      (j) => j.id === newJob.id || (j.linkedinUrl && newJob.linkedinUrl && j.linkedinUrl === newJob.linkedinUrl)
+    );
+    if (existingIndex >= 0) {
+      this.jobs[existingIndex] = { ...this.jobs[existingIndex], ...newJob };
+      this.persist();
+      return this.jobs[existingIndex];
+    } else {
+      this.jobs.unshift(newJob);
+      this.persist();
+      return newJob;
+    }
+  }
+
+  public addBulkJobs(newJobs: JobPosting[]): number {
+    let addedCount = 0;
+    for (const job of newJobs) {
+      const existsIndex = this.jobs.findIndex(
+        (j) => j.id === job.id || (j.linkedinUrl && job.linkedinUrl && j.linkedinUrl === job.linkedinUrl)
+      );
+      if (existsIndex >= 0) {
+        this.jobs[existsIndex] = { ...this.jobs[existsIndex], ...job };
+      } else {
+        this.jobs.unshift(job);
+        addedCount++;
+      }
+    }
+    if (addedCount > 0 || newJobs.length > 0) {
+      this.persist();
+    }
+    return addedCount;
+  }
+
+  public removeJob(id: string): boolean {
+    const initialLength = this.jobs.length;
+    this.jobs = this.jobs.filter((j) => j.id !== id);
+    if (this.jobs.length < initialLength) {
+      this.persist();
+      return true;
+    }
+    return false;
+  }
+
+  public clearAllJobs(): void {
+    this.jobs = [];
+    this.persist();
+  }
+}
+
+export const jobRepository = new JobRepository();

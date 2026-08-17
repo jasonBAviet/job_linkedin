@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cvMatcherService } from "@/core/services/cv-matcher-service";
 
+
+// Route chạm database qua SSH tunnel -> không được prerender lúc build
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -13,7 +17,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const result = cvMatcherService.analyzeAndMatchCv(cvText);
+    const result = await cvMatcherService.analyzeAndMatchCv(cvText);
 
     return NextResponse.json({
       success: true,

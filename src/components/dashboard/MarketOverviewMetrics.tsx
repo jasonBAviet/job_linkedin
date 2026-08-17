@@ -1,6 +1,6 @@
 import React from "react";
 import { Briefcase, MapPin, TrendingUp, Sparkles, Database, CheckCircle2 } from "lucide-react";
-import { JobWithScore } from "@/core/services/job-service";
+import type { JobWithScore } from "@/core/dtos/job-with-score.dto";
 
 interface MarketOverviewMetricsProps {
   jobs: JobWithScore[];

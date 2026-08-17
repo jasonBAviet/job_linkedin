@@ -5,24 +5,33 @@
   "scripts": {
     "dev": "next dev --port 3000",
     "build": "next build",
-    "start": "next start --port 3000"
+    "start": "next start --port 3000",
+    "db:doctor": "node scripts/db-doctor.mjs",
+    "db:migrate": "node scripts/migrate.mjs",
+    "db:import": "node scripts/import-jobs-json.mjs",
+    "db:seed": "node scripts/seed-profile.mjs",
+    "db:verify": "node scripts/db-verify.mjs"
   },
   "dependencies": {
     "canvas-confetti": "^1.9.4",
-    "cheerio": "^1.0.0",
     "clsx": "^2.1.1",
     "lucide-react": "^0.475.0",
     "next": "^15.2.0",
+    "pg": "^8.23.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "recharts": "^2.15.1",
+    "server-only": "^0.0.1",
+    "ssh2": "^1.17.0",
     "tailwind-merge": "^3.0.2"
   },
   "devDependencies": {
     "@types/canvas-confetti": "^1.9.0",
     "@types/node": "^22.13.0",
+    "@types/pg": "^8.21.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@types/ssh2": "^1.15.5",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.5.1",
     "tailwindcss": "^3.4.17",

@@ -2,10 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { jobService } from "@/core/services/job-service";
 import { profileRepository } from "@/core/repositories/profile-repository";
 
+
+// Route chạm database qua SSH tunnel -> không được prerender lúc build
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 export async function GET() {
   try {
-    const apps = jobService.getApplications();
-    const allJobs = jobService.getScoredJobs().jobs;
+    const apps = await jobService.getApplications();
+    const allJobs = (await jobService.getScoredJobs()).jobs;
 
     const populated = apps.map((app) => {
       const job = allJobs.find((j) => j.id === app.jobId);
@@ -36,7 +40,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, message: "Mã việc làm (jobId) là bắt buộc" }, { status: 400 });
     }
 
-    const saved = jobService.trackJobApplication(jobId, status || "SAVED", notes);
+    const saved = await jobService.trackJobApplication(jobId, status || "SAVED", notes);
 
     return NextResponse.json({
       success: true,
@@ -60,7 +64,7 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ success: false, message: "Thiếu jobId" }, { status: 400 });
     }
 
-    const removed = profileRepository.removeApplication(jobId);
+    const removed = await profileRepository.removeApplication(jobId);
     return NextResponse.json({
       success: true,
       removed,
