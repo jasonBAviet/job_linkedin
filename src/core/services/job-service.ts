@@ -1,28 +1,55 @@
 import { JobPosting, JobSearchFilters } from "../dtos/job.dto";
+import { classifySeniority } from "../utils/role-classifier";
 import { ApplicationRecord, CandidateProfile } from "../dtos/profile.dto";
-import { JobMatchScoreResult } from "../dtos/scoring.dto";
+import { JobWithScore } from "../dtos/job-with-score.dto";
 import { jobRepository } from "../repositories/job-repository";
 import { profileRepository } from "../repositories/profile-repository";
 import { scoringService } from "./scoring-service";
-import { scraperService, ScrapeOptions } from "./scraper-service";
+import { scraperService } from "./scraper-service";
 
-export interface JobWithScore extends JobPosting {
-  scoreResult: JobMatchScoreResult;
-}
+// Định nghĩa đã chuyển sang DTO thuần để component client không kéo pg/ssh2 vào bundle.
+// Giữ re-export để mọi import cũ vẫn chạy.
+export type { JobWithScore } from "../dtos/job-with-score.dto";
 
 export class JobService {
   /**
+   * Chuẩn hóa lại các trường được suy đoán trước khi chấm điểm và trả về UI.
+   *
+   * Các bản ghi đã nằm trong DB được phân loại bằng logic cũ (quét cả phần mô tả nên
+   * "Business Analyst, Internship" thành LEAD_MANAGER, và mặc định về SENIOR khi không
+   * đoán được). Chuẩn hóa lúc đọc giúp cả điểm số lẫn thông tin hiển thị cùng đúng
+   * mà không phải nạp lại toàn bộ dữ liệu.
+   */
+  private normalizeInference<T extends JobPosting>(job: T): T {
+    const fromTitle = classifySeniority(job.title || "");
+    if (!fromTitle?.fromTitle || fromTitle.level === job.seniority) return job;
+
+    return {
+      ...job,
+      seniority: fromTitle.level,
+      experienceYearsRequired: fromTitle.experienceYears,
+      inferredFields: Array.from(
+        new Set([...(job.inferredFields || []), "seniority", "experienceYearsRequired"])
+      ),
+    };
+  }
+
+  /**
    * Lấy danh sách việc làm đã được tính điểm tương thích theo hồ sơ ứng viên hiện tại
    */
-  public getScoredJobs(filters: JobSearchFilters = {}): {
+  public async getScoredJobs(filters: JobSearchFilters = {}): Promise<{
     jobs: JobWithScore[];
     totalCount: number;
     profile: CandidateProfile;
-  } {
-    const profile = profileRepository.getProfile();
-    const rawJobs = jobRepository.filterJobs(filters);
+  }> {
+    // Chạy song song: hồ sơ và danh sách job không phụ thuộc nhau
+    const [profile, rawJobs] = await Promise.all([
+      profileRepository.getProfile(),
+      jobRepository.filterJobs(filters),
+    ]);
 
-    let scoredJobs: JobWithScore[] = rawJobs.map((job) => {
+    let scoredJobs: JobWithScore[] = rawJobs.map((rawJob) => {
+      const job = this.normalizeInference(rawJob);
       const scoreResult = scoringService.calculateMatchScore(profile, job);
       return {
         ...job,
@@ -48,11 +75,12 @@ export class JobService {
   /**
    * Lấy chi tiết việc làm cùng phân tích điểm chuyên sâu
    */
-  public getJobDetailWithScore(id: string): JobWithScore | undefined {
-    const job = jobRepository.getJobById(id);
-    if (!job) return undefined;
+  public async getJobDetailWithScore(id: string): Promise<JobWithScore | undefined> {
+    const rawJob = await jobRepository.getJobById(id);
+    if (!rawJob) return undefined;
 
-    const profile = profileRepository.getProfile();
+    const job = this.normalizeInference(rawJob);
+    const profile = await profileRepository.getProfile();
     const scoreResult = scoringService.calculateMatchScore(profile, job);
 
     return {
@@ -62,32 +90,21 @@ export class JobService {
   }
 
   /**
-   * Thực hiện cào thêm dữ liệu từ LinkedIn và bổ sung vào kho lưu trữ
-   */
-  public async scrapeAndIngestJobs(options: ScrapeOptions): Promise<{ addedCount: number; totalJobs: number }> {
-    const scrapedJobs = await scraperService.scrapeLinkedInJobs(options);
-    const addedCount = jobRepository.addBulkJobs(scrapedJobs);
-    const totalJobs = jobRepository.getAllJobs().length;
-
-    return { addedCount, totalJobs };
-  }
-
-  /**
    * Phân tích và chấm điểm một bản JD tùy biến
    */
-  public scoreCustomJD(
+  public async scoreCustomJD(
     title: string,
     company: string,
     rawText: string,
     location?: "HO_CHI_MINH" | "DONG_NAI",
     url?: string
-  ): JobWithScore {
-    const profile = profileRepository.getProfile();
+  ): Promise<JobWithScore> {
+    const profile = await profileRepository.getProfile();
     const job = scraperService.parseCustomJDText(title, company, rawText, location, url);
     const scoreResult = scoringService.calculateMatchScore(profile, job);
 
     // Lưu vào repository để người dùng có thể tra cứu lại
-    jobRepository.addJob(job);
+    await jobRepository.addJob(job);
 
     return {
       ...job,
@@ -98,12 +115,12 @@ export class JobService {
   /**
    * Quản lý tiến trình ứng tuyển
    */
-  public getApplications(): ApplicationRecord[] {
+  public async getApplications(): Promise<ApplicationRecord[]> {
     return profileRepository.getApplications();
   }
 
-  public trackJobApplication(jobId: string, status: ApplicationRecord["status"], notes?: string): ApplicationRecord {
-    const jobWithScore = this.getJobDetailWithScore(jobId);
+  public async trackJobApplication(jobId: string, status: ApplicationRecord["status"], notes?: string): Promise<ApplicationRecord> {
+    const jobWithScore = await this.getJobDetailWithScore(jobId);
     return profileRepository.saveOrUpdateApplication({
       jobId,
       status,

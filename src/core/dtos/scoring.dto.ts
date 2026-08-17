@@ -10,12 +10,34 @@ export interface SkillMatchDetail {
 }
 
 export interface ScoreBreakdown {
-  coreSkillsScore: number; // Max 50
-  secondarySkillsScore: number; // Max 20
-  seniorityScore: number; // Max 15
-  locationScore: number; // Max 10
-  certificationScore: number; // Max 5
+  /** Độ phủ kỹ năng JD yêu cầu (mặc định tối đa 55) */
+  skillCoverageScore: number;
+  /** Vai trò job khớp định hướng nghề nghiệp (mặc định tối đa 15) */
+  roleRelevanceScore: number;
+  /** Khớp cấp bậc, phạt cả thừa lẫn thiếu (mặc định tối đa 15) */
+  seniorityFitScore: number;
+  /** Mức độ đáng nộp đơn theo cạnh tranh (mặc định tối đa 15) */
+  opportunityScore: number;
+  /** Hệ số nhân theo địa điểm, 0.85 - 1.0 */
+  locationMultiplier: number;
   totalScore: number; // 0 - 100
+}
+
+/**
+ * Mức độ tin cậy của dữ liệu JD dùng để chấm điểm.
+ * Tách khỏi điểm số để người dùng phân biệt "job không phù hợp"
+ * với "JD viết quá sơ sài nên không đủ căn cứ chấm".
+ */
+export type ScoreEvidenceLevel = "HIGH" | "MEDIUM" | "LOW";
+
+export interface ScoreEvidence {
+  level: ScoreEvidenceLevel;
+  /** Số kỹ năng trích được từ JD */
+  extractedSkillCount: number;
+  /** Các trường bị suy đoán thay vì lấy trực tiếp từ nguồn */
+  inferredFields: string[];
+  /** Diễn giải ngắn cho người dùng */
+  reason?: string;
 }
 
 export interface RadarMetric {
@@ -39,7 +61,12 @@ export interface JobMatchScoreResult {
   totalScore: number; // 0 - 100
   scoreTier: "PERFECT_MATCH" | "HIGH_MATCH" | "MODERATE_MATCH" | "LOW_MATCH";
   breakdown: ScoreBreakdown;
-  radarData: RadarMetric[];
+  /**
+   * Tỷ lệ đáp ứng yêu cầu kỹ năng của JD (0 - 1), chưa pha trộn với các chiều khác.
+   * Giữ riêng để vẫn sắp xếp được theo độ khớp thuần khi cần.
+   */
+  coverageRatio: number | null;
+  evidence: ScoreEvidence;
   gapAnalysis: GapAnalysisResult;
   skillDetails: SkillMatchDetail[];
 }

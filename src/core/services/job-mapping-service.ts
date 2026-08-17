@@ -1,7 +1,27 @@
-import { JobPosting, JobRoleCategory, SeniorityLevel, WorkLocation } from "../dtos/job.dto";
+import { ApplyType, JobDataSource, JobPosting, JobRoleCategory, SeniorityLevel, WorkLocation, WorkMode } from "../dtos/job.dto";
 import { scoringService } from "./scoring-service";
 import { getCompanyLogoUrl } from "../utils/logo-resolver";
 import { DEFAULT_SYSTEM_CONFIG, SystemConfig } from "../constants/app-config";
+import { SalaryExtractor } from "../utils/salary-extractor";
+import { parseCompetitionAndMetadata } from "../utils/competition-parser";
+import {
+  classifyRole,
+  classifySeniority as classifySeniorityFromText,
+} from "../utils/role-classifier";
+
+export class IngestError extends Error {
+  public readonly code: string;
+  public readonly missingFields: string[];
+
+  constructor(code: string, message: string, missingFields: string[] = []) {
+    super(message);
+    this.name = "IngestError";
+    this.code = code;
+    this.missingFields = missingFields;
+  }
+}
+
+const MIN_DESCRIPTION_LENGTH = 80;
 
 export interface RawIngestedJob {
   id?: string;
@@ -22,8 +42,18 @@ export interface RawIngestedJob {
   url?: string;
   pageTitle?: string;
   companyLogo?: string;
-  workMode?: "ON_SITE" | "HYBRID" | "REMOTE";
+  workMode?: WorkMode;
+  isEasyApply?: boolean;
+  applyType?: ApplyType;
   postedDate?: string;
+  crawledAt?: string;
+  timestamp?: string;
+  linkedinJobId?: string | null;
+  applicantCountText?: string;
+  applicantCount?: number;
+  dataSource?: JobDataSource;
+  extractOk?: boolean;
+  missingFields?: string[];
 }
 
 export class JobMappingService {
@@ -33,55 +63,62 @@ export class JobMappingService {
     this.config = { ...DEFAULT_SYSTEM_CONFIG, ...customConfig };
   }
 
-  /**
-   * Cập nhật cấu hình động cho Mapping Service
-   */
   public updateConfig(newConfig: Partial<SystemConfig>): void {
     this.config = { ...this.config, ...newConfig };
   }
 
-  /**
-   * Ánh xạ toàn bộ dữ liệu thô (Raw Ingestion) thành đối tượng JobPosting chuẩn hóa
-   */
   public mapRawToJobPosting(raw: RawIngestedJob, customConfig?: Partial<SystemConfig>): JobPosting {
     const activeConfig = customConfig ? { ...this.config, ...customConfig } : this.config;
-    const rawContent = raw.rawContent || raw.jobDescription || raw.description || "";
+    const rawContent = (raw.rawContent || raw.jobDescription || raw.description || "").trim();
     const rawBadges = raw.rawBadges || [];
 
-    // 1. Ánh xạ Tiêu đề công việc
+    if (rawContent.length < MIN_DESCRIPTION_LENGTH) {
+      throw new IngestError(
+        "MISSING_DESCRIPTION",
+        `Không đọc được mô tả công việc (chỉ ${rawContent.length} ký tự, cần tối thiểu ${MIN_DESCRIPTION_LENGTH}).`,
+        ["jobDescription"]
+      );
+    }
+
     const title = this.resolveJobTitle(raw.rawTitle || raw.title, rawContent, raw.pageTitle);
-
-    // 2. Ánh xạ Tên công ty
     const company = this.resolveCompany(raw.rawCompany || raw.company, rawContent);
-
-    // 3. Phân loại Địa điểm động
     const locationInfo = this.classifyLocation(raw.rawLocation || raw.locationDetails, rawContent, rawBadges, activeConfig);
-
-    // 4. Phân loại Vai trò động
-    const roleCategory = this.classifyRoleCategory(title, rawContent, activeConfig);
-
-    // 5. Phân loại Cấp bậc động
+    const roleInfo = this.classifyRoleCategory(title, rawContent, activeConfig);
     const seniorityInfo = this.classifySeniority(title, rawContent, activeConfig);
-
-    // 6. Chuẩn hóa Mức lương động
-    const salaryRange = this.parseSalary(raw.rawSalaryText || raw.salaryText, rawContent, rawBadges, activeConfig);
-
-    // 7. Xác định Hình thức làm việc
+    const salaryRange = this.parseSalary(raw.rawSalaryText || raw.salaryText, rawContent, rawBadges, title, activeConfig);
     const workMode = this.classifyWorkMode(raw.workMode, rawContent, rawBadges);
+    const { applyType, isEasyApply } = this.classifyApplyType(raw.applyType, rawBadges, rawContent, raw.isEasyApply);
 
-    // 8. Trích xuất Kỹ năng
-    const fullTextForSkills = `${title} ${company} ${rawBadges.join(" ")} ${rawContent}`;
+    // Bóc tách thông tin ứng tuyển và mức độ cạnh tranh
+    const competitionInfo = parseCompetitionAndMetadata({
+      rawLocation: raw.rawLocation,
+      locationDetails: raw.locationDetails,
+      rawBadges,
+      rawContent,
+      postedDate: raw.postedDate,
+    });
+
+    // Không đưa tên công ty vào: "Fintech Solutions JSC" hay "Retail Group" sẽ tự tiêm
+    // kỹ năng không hề có trong yêu cầu công việc.
+    const fullTextForSkills = `${title} ${rawBadges.join(" ")} ${rawContent}`;
     const extractedSkills = scoringService.extractSkillsFromText(fullTextForSkills);
-
-    // 9. Tách tóm tắt Trách nhiệm & Yêu cầu
     const { responsibilities, requirements } = this.extractSummaries(rawContent);
-
-    // 10. Phân giải Logo thương hiệu
     const companyLogo = getCompanyLogoUrl(company, raw.companyLogo);
 
-    const id = raw.id || `job-ingested-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-    const linkedinUrl = raw.linkedinUrl || raw.url || raw.pageUrl || "https://www.linkedin.com/jobs";
-    const postedDate = raw.postedDate || new Date().toISOString().split("T")[0];
+    const sourceUrl = raw.linkedinUrl || raw.url || raw.pageUrl || "";
+    const jobId = raw.linkedinJobId || this.extractLinkedInJobId(sourceUrl);
+    const linkedinUrl = jobId ? `https://www.linkedin.com/jobs/view/${jobId}/` : sourceUrl;
+    if (!raw.id && !jobId && !sourceUrl) {
+      throw new IngestError("MISSING_IDENTITY", "Thiếu định danh việc làm (ID/URL).", ["linkedinUrl"]);
+    }
+    const id = raw.id || (jobId ? `li-${jobId}` : `url-${this.hashString(linkedinUrl)}`);
+
+    const missingFields: string[] = [...(raw.missingFields || [])];
+    if (!salaryRange) missingFields.push("salaryRange");
+    if (!companyLogo) missingFields.push("companyLogo");
+    if (!competitionInfo.parsedPostedDate) missingFields.push("postedDate");
+
+    const finalLocationDetails = competitionInfo.cleanedLocationDetails || locationInfo.locationDetails;
 
     return {
       id,
@@ -89,31 +126,70 @@ export class JobMappingService {
       company,
       companyLogo,
       location: locationInfo.location,
-      locationDetails: locationInfo.locationDetails,
-      roleCategory,
+      locationDetails: finalLocationDetails,
+      roleCategory: roleInfo.category,
       seniority: seniorityInfo.level,
       salaryRange,
       workMode,
-      jobDescription: rawContent.length > 20 ? rawContent : `Tuyển dụng ${title} tại ${company}. Chi tiết xem tại ${linkedinUrl}`,
-      requirementsSummary: requirements.length > 0 ? requirements : ["Có kinh nghiệm thực tế phù hợp với yêu cầu vị trí."],
-      responsibilitiesSummary: responsibilities.length > 0 ? responsibilities : ["Tham gia thực hiện các nhiệm vụ phân tích theo kế hoạch dự án."],
-      extractedSkills: extractedSkills.length > 0 ? extractedSkills : [
-        { name: "Requirements Engineering", category: "CORE", importance: "MUST_HAVE" },
-        { name: "SQL (Advanced Querying)", category: "CORE", importance: "MUST_HAVE" },
-      ],
+      applyType,
+      isEasyApply,
+      jobDescription: rawContent,
+      requirementsSummary: requirements,
+      responsibilitiesSummary: responsibilities,
+      extractedSkills,
       linkedinUrl,
-      postedDate,
+      postedDate: competitionInfo.parsedPostedDate || raw.postedDate || "",
+      crawledAt: raw.crawledAt || raw.timestamp || new Date().toISOString(),
       experienceYearsRequired: seniorityInfo.experienceYears,
+      applicantCountText: competitionInfo.applicantCountText,
+      applicantCount: competitionInfo.applicantCount,
+      competitionLevel: competitionInfo.competitionLevel,
+      isPromoted: competitionInfo.isPromoted,
+      responsesManagedOffLinkedIn: competitionInfo.responsesManagedOffLinkedIn,
+      isActivelyReviewing: competitionInfo.isActivelyReviewing,
       rawContent,
       rawBadges,
+      dataSource: raw.dataSource || "LINKEDIN_DOM",
+      inferredFields: [
+        ...(roleInfo.isInferred ? ["roleCategory"] : []),
+        ...(seniorityInfo.isInferred ? ["seniority", "experienceYearsRequired"] : []),
+        "workMode",
+      ],
+      missingFields,
     };
   }
 
-  /**
-   * Ánh xạ danh sách việc làm thô
-   */
+  private extractLinkedInJobId(url: string): string | null {
+    if (!url) return null;
+    const viaPath = url.match(/\/jobs\/view\/(?:[^/]*?-)?(\d{6,})/);
+    if (viaPath) return viaPath[1];
+    const viaQuery = url.match(/[?&]currentJobId=(\d{6,})/);
+    return viaQuery ? viaQuery[1] : null;
+  }
+
+  private hashString(input: string): string {
+    let h = 0;
+    for (let i = 0; i < input.length; i++) {
+      h = (h << 5) - h + input.charCodeAt(i);
+      h |= 0;
+    }
+    return Math.abs(h).toString(36);
+  }
+
   public mapBulkRawJobs(rawJobs: RawIngestedJob[], customConfig?: Partial<SystemConfig>): JobPosting[] {
-    return rawJobs.map((raw) => this.mapRawToJobPosting(raw, customConfig));
+    const mapped: JobPosting[] = [];
+    for (const raw of rawJobs) {
+      try {
+        mapped.push(this.mapRawToJobPosting(raw, customConfig));
+      } catch (err) {
+        if (err instanceof IngestError) {
+          console.warn(`[ingest] Bỏ qua 1 bản ghi: ${err.message}`);
+          continue;
+        }
+        throw err;
+      }
+    }
+    return mapped;
   }
 
   private resolveJobTitle(titleInput?: string, rawContent?: string, pageTitle?: string): string {
@@ -126,15 +202,10 @@ export class JobMappingService {
     }
     const fullText = (rawContent || "").substring(0, 300);
     const titleMatch = fullText.match(/(Senior|Lead|Junior|Principal|Middle)?\s*(IT Business Analyst|Business Analyst|Data Analyst|Product Business Analyst|Product Owner|BI Specialist|IT BA|Data Engineer|ERP Consultant)/i);
-    if (titleMatch) {
-      return titleMatch[0].trim();
-    }
+    if (titleMatch) return titleMatch[0].trim();
     const lines = (rawContent || "").split("\n").map((l) => l.trim()).filter((l) => l.length > 5);
-    if (lines.length > 0) {
-      const firstLine = lines[0];
-      if (firstLine.length < 80) return firstLine;
-    }
-    return "Senior Business / Data Analyst";
+    if (lines.length > 0 && lines[0].length < 80) return lines[0];
+    throw new IngestError("MISSING_TITLE", "Không đọc được tiêu đề công việc.", ["title"]);
   }
 
   private resolveCompany(companyInput?: string, rawContent?: string): string {
@@ -143,14 +214,10 @@ export class JobMappingService {
     }
     const fullText = (rawContent || "").substring(0, 300);
     const compMatch = fullText.match(/^([A-Za-z0-9\s&.,-]{2,40})\s+(tuyển dụng|tuyển|cần tuyển|is hiring|looking for)/i);
-    if (compMatch) {
-      return compMatch[1].trim();
-    }
+    if (compMatch) return compMatch[1].trim();
     const lines = (rawContent || "").split("\n").map((l) => l.trim()).filter((l) => l.length > 2);
-    if (lines.length > 1 && lines[1].length < 60) {
-      return lines[1];
-    }
-    return "Doanh nghiệp tuyển dụng";
+    if (lines.length > 1 && lines[1].length < 60) return lines[1];
+    throw new IngestError("MISSING_COMPANY", "Không đọc được tên công ty.", ["company"]);
   }
 
   private classifyLocation(
@@ -158,124 +225,107 @@ export class JobMappingService {
     rawContent?: string,
     badges: string[] = [],
     cfg: SystemConfig = DEFAULT_SYSTEM_CONFIG
-  ): { location: WorkLocation; locationDetails: string } {
+  ): { location: WorkLocation; locationDetails: string; inferred: boolean } {
     const combined = `${locationInput || ""} ${badges.join(" ")} ${(rawContent || "").substring(0, 1000)}`.toLowerCase();
-
     for (const rule of cfg.locations) {
       for (const kw of rule.keywords) {
         if (combined.includes(kw.toLowerCase())) {
           return {
             location: rule.location,
             locationDetails: locationInput && locationInput.length > 3 ? locationInput : rule.defaultDetails,
+            inferred: !(locationInput && locationInput.length > 3),
           };
         }
       }
     }
-
     return {
       location: cfg.defaultLocation,
-      locationDetails: locationInput && locationInput.length > 3 ? locationInput : "Khu vực tuyển dụng",
+      locationDetails: locationInput && locationInput.length > 3 ? locationInput : "Không rõ địa điểm",
+      inferred: true,
     };
   }
 
-  private classifyRoleCategory(title: string, rawContent: string, cfg: SystemConfig = DEFAULT_SYSTEM_CONFIG): JobRoleCategory {
-    const titleLower = title.toLowerCase();
-    const contentLower = rawContent.substring(0, 600).toLowerCase();
-
-    for (const rule of cfg.roleCategories) {
-      const matchTitle = rule.titleKeywords.some((kw) => titleLower.includes(kw.toLowerCase()));
-      const matchContent = rule.contentKeywords.some((kw) => contentLower.includes(kw.toLowerCase()));
-      if (matchTitle || matchContent) {
-        return rule.category;
-      }
+  /**
+   * Phân loại nhóm vai trò. `isInferred` cho biết kết quả có phải giá trị mặc định
+   * hay không, để chiều "liên quan vai trò" lúc chấm điểm không tin tưởng mù quáng.
+   */
+  private classifyRoleCategory(
+    title: string,
+    rawContent: string,
+    cfg: SystemConfig = DEFAULT_SYSTEM_CONFIG
+  ): { category: JobRoleCategory; isInferred: boolean } {
+    const result = classifyRole(title, rawContent, cfg);
+    if (result) {
+      return { category: result.category, isInferred: !result.hasTitleSignal };
     }
-
-    return "BUSINESS_ANALYST";
+    return { category: "BUSINESS_ANALYST", isInferred: true };
   }
 
-  private classifySeniority(title: string, rawContent: string, cfg: SystemConfig = DEFAULT_SYSTEM_CONFIG): { level: SeniorityLevel; experienceYears: number } {
-    const combined = `${title} ${rawContent.substring(0, 300)}`.toLowerCase();
-
-    for (const rule of cfg.seniorities) {
-      for (const kw of rule.keywords) {
-        if (combined.includes(kw.toLowerCase())) {
-          return {
-            level: rule.level,
-            experienceYears: rule.defaultExperienceYears,
-          };
-        }
-      }
+  /**
+   * Phân loại cấp bậc. Mặc định cũ trả về SENIOR/4 năm khi không đoán được — trùng khớp
+   * chính xác hồ sơ ứng viên nên tự động cho điểm cấp bậc tối đa. Nay mặc định là MIDDLE
+   * và luôn được ghi nhận vào inferredFields.
+   */
+  private classifySeniority(
+    title: string,
+    rawContent: string,
+    cfg: SystemConfig = DEFAULT_SYSTEM_CONFIG
+  ): { level: SeniorityLevel; experienceYears: number; isInferred: boolean } {
+    const result = classifySeniorityFromText(title, rawContent, cfg);
+    if (result) {
+      return {
+        level: result.level,
+        experienceYears: result.experienceYears,
+        isInferred: !result.fromTitle,
+      };
     }
-
-    return {
-      level: "SENIOR",
-      experienceYears: 4,
-    };
+    return { level: "MIDDLE", experienceYears: 2.5, isInferred: true };
   }
 
-  private parseSalary(
+  public parseSalary(
     salaryInput?: string,
     rawContent?: string,
     badges: string[] = [],
-    cfg: SystemConfig = DEFAULT_SYSTEM_CONFIG
-  ): { min?: number; max?: number; currency: "VND" | "USD"; display: string; isNegotiable?: boolean } {
-    const candidateText = salaryInput || badges.find((b) => b.includes("₫") || b.includes("$") || b.includes("Triệu") || b.includes("tháng")) || "";
-    if (candidateText && candidateText.length > 2) {
-      const isUSD = candidateText.includes("$") || candidateText.toUpperCase().includes("USD");
-      return {
-        currency: isUSD ? "USD" : "VND",
-        display: candidateText,
-        isNegotiable: true,
-      };
-    }
-
-    const fullText = (rawContent || "").substring(0, 1500);
-    const vnMatch = fullText.match(/(\d{1,2})\s*[-–to]+\s*(\d{1,2})\s*(tr|triệu|million)/i);
-    if (vnMatch) {
-      const min = parseInt(vnMatch[1], 10) * 1000000;
-      const max = parseInt(vnMatch[2], 10) * 1000000;
-      return {
-        min,
-        max,
-        currency: "VND",
-        display: `${vnMatch[1]} - ${vnMatch[2]} Triệu VNĐ`,
-      };
-    }
-
-    return {
-      currency: cfg.defaultCurrency,
-      display: "Thỏa thuận theo năng lực",
-      isNegotiable: true,
-    };
+    title: string = "",
+    _cfg: SystemConfig = DEFAULT_SYSTEM_CONFIG
+  ): { min?: number; max?: number; currency: "VND" | "USD"; display: string; isNegotiable?: boolean } | undefined {
+    return SalaryExtractor.extract(salaryInput, rawContent, badges, title);
   }
 
-  private classifyWorkMode(modeInput?: string, rawContent?: string, badges: string[] = []): "ON_SITE" | "HYBRID" | "REMOTE" {
-    if (modeInput === "ON_SITE" || modeInput === "HYBRID" || modeInput === "REMOTE") {
-      return modeInput;
-    }
+  private classifyWorkMode(modeInput?: string, rawContent?: string, badges: string[] = []): WorkMode {
+    if (modeInput === "ON_SITE" || modeInput === "HYBRID" || modeInput === "REMOTE") return modeInput;
     const text = `${badges.join(" ")} ${(rawContent || "").substring(0, 500)}`.toLowerCase();
     if (text.includes("remote") || text.includes("từ xa")) return "REMOTE";
     if (text.includes("on-site") || text.includes("onsite") || text.includes("tại văn phòng")) return "ON_SITE";
     return "HYBRID";
   }
 
+  private classifyApplyType(
+    rawApplyType?: string,
+    badges: string[] = [],
+    rawContent: string = "",
+    explicitIsEasyApply?: boolean
+  ): { applyType: ApplyType; isEasyApply: boolean } {
+    if (explicitIsEasyApply === true || rawApplyType === "EASY_APPLY") {
+      return { applyType: "EASY_APPLY", isEasyApply: true };
+    }
+    const combined = `${badges.join(" ")} ${rawContent.substring(0, 800)}`.toLowerCase();
+    if (combined.includes("easy apply") || combined.includes("easyapply") || combined.includes("ứng tuyển dễ dàng")) {
+      return { applyType: "EASY_APPLY", isEasyApply: true };
+    }
+    return { applyType: "EXTERNAL_APPLY", isEasyApply: false };
+  }
+
   private extractSummaries(rawContent: string): { responsibilities: string[]; requirements: string[] } {
     const lines = rawContent
       .split("\n")
       .map((l) => l.trim().replace(/^[-*•+•\d.]\s*/, ""))
-      .filter((l) => l.length > 15 && !l.toLowerCase().includes("linkedin") && !l.toLowerCase().includes("easy apply"));
+      .filter((l) => l.length > 15 && !l.toLowerCase().includes("linkedin"));
 
     if (lines.length >= 6) {
-      return {
-        responsibilities: lines.slice(0, 4),
-        requirements: lines.slice(4, 8),
-      };
+      return { responsibilities: lines.slice(0, 4), requirements: lines.slice(4, 8) };
     }
-
-    return {
-      responsibilities: lines.slice(0, 3),
-      requirements: lines.slice(3, 6),
-    };
+    return { responsibilities: lines.slice(0, 3), requirements: lines.slice(3, 6) };
   }
 }
 
